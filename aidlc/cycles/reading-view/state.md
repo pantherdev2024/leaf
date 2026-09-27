@@ -10,13 +10,14 @@ mode: run
 
 ## Where we are
 
-Spec approved 2026-09-27. The design and architecture were changed first, with the
-owner's agreement (commit "Open the reading-view cycle and change the foundation for
-it"). No plan yet.
+Phase 1, nothing detailed. Spec approved and plan approved 2026-09-27: two phases,
+seven slices (four high, three medium). The design and architecture were changed
+first, with the owner's agreement.
 
 ## Next
 
-Write the plan: `plan-work` on `reading-view`.
+Detail and execute slice 1-1 reading-renderer: `execute-slice` on `reading-view`.
+Effort high.
 
 ## Done
 
