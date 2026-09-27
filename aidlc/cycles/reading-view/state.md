@@ -10,16 +10,19 @@ mode: run
 
 ## Where we are
 
-Phase 1, slice 1-1 done. 1-2 not yet detailed.
+Phase 1, slices 1-1 and 1-2 done. Waiting on the owner: whether to bring 2-1
+(outline in the reading view) forward before 1-3, and whether to restyle toward the
+T3 Code look shown in a mock-up (see 1-2's notes).
 
 ## Next
 
-Detail and execute slice 1-2 reading-view-window: `execute-slice` on `reading-view`.
-Effort high.
+The owner answers the order question. If 2-1 comes first, record the scope change,
+then `execute-slice` on 2-1; otherwise `execute-slice` on 1-3 tables-and-code.
 
 ## Done
 
 - 2026-09-27 1-1 reading-renderer
+- 2026-09-27 1-2 reading-view-window
 
 ## For a cold session
 

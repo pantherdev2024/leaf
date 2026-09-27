@@ -45,7 +45,7 @@ reads.
   show the display copy and restyled output as the spec describes, including a list
   and a table after `<context>` coming through whole, and the speed and the real-file
   findings are recorded, with any shortfall raised. Depends on: none.
-- [ ] 1-2 reading-view-window -- Show the renderer's document in a read-only view
+- [x] 1-2 reading-view-window -- Show the renderer's document in a read-only view
   where every file opens, and add Ctrl+E: opening, reloading and recovery show the
   reading view at its start, a new empty window opens in editing, returning to
   reading shows unsaved edits, typing and editing keys do nothing there, text can be

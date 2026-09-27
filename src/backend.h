@@ -67,6 +67,9 @@ public:
     static QString suggestedFileName(const QString &text);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
+    // The reading view's own document, which renderReading fills from the text.
+    Q_INVOKABLE void attachReadingDocument(QObject *textDocument);
+    Q_INVOKABLE void renderReading();
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();
@@ -145,6 +148,7 @@ private:
     QTimer m_recoveryTimer;
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;
+    QPointer<QTextDocument> m_readingDocument;
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;
     QString m_lastDocumentText;

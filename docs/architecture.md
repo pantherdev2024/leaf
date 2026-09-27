@@ -122,8 +122,9 @@ them on to the window and the highlighter. It knows nothing about documents.
 dialog. The core reads the file, keeps its exact bytes as the last known contents,
 loads the text into the editor's document, starts watching the file, and clears any
 recovery snapshot. The highlighter styles the text; the core derives the outline and
-stats; the reading renderer builds the rendered copy. The core then announces that a document was loaded, and the window answers by
-showing the reading view at its start, with the editor's cursor at the start too. Every load passes
+stats. The core then announces that a document was loaded, and the window answers by
+asking the core to render the reading view and showing it at its start, with the
+editor's cursor at the start too. Every load passes
 through that one point -- opening, reloading after an outside change, and restoring
 a recovery snapshot -- so all of them start at the top. Without it the cursor is
 left at the end of the new text and the view follows it there.
@@ -140,8 +141,12 @@ marked, even one too near the end to reach the top, until the view next moves.
 **Switching views.** Ctrl+E swaps the reading view and the editor. The window notes
 the heading at the top of the one being left and brings the same heading, found by
 its place in the outline, to the top of the other. Within a section the place is
-kept as closely as the two layouts allow. The editor is hidden, not destroyed, while
-reading, so its undo history and cursor survive.
+kept as closely as the two layouts allow. The two views sit in one scrolling area,
+one hidden while the other shows, so both keep Leaf's scrolling feel. The editor is
+hidden, not destroyed, while reading, so its undo history and cursor survive. The
+window asks the core for a fresh render whenever it shows the reading view, and when
+the theme, the mode or the text size changes while it is shown. The core applies the
+restyle as one change, so the view lays the page out once.
 
 **Editing.** A keystroke changes the editor's document. The highlighter restyles the
 changed lines; the core marks the document modified, schedules a recovery snapshot,

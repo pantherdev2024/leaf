@@ -237,9 +237,14 @@ void render(QTextDocument *document, const QString &text, const Style &style) {
     document->setDefaultFont(font);
     document->setIndentWidth(style.bodyPixelSize * 1.5);
 
+    // One edit for the whole restyle, so a view showing the document lays it out
+    // once rather than after every change.
+    QTextCursor edit(document);
+    edit.beginEditBlock();
     resolveImages(document, style.fileUrl);
     for (QTextBlock block = document->begin(); block.isValid(); block = block.next())
         restyleBlock(block, style, block == document->begin());
+    edit.endEditBlock();
 }
 
 QList<RenderedHeading> headings(const QTextDocument *document) {

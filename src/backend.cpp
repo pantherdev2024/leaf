@@ -32,9 +32,12 @@
 #include <algorithm>
 
 #include "markdownhighlighter.h"
+#include "readingrenderer.h"
 #include "structurescan.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
+// The reading view's body size at text scale 1, the editor's own.
+constexpr qreal readingBodyPixelSize = 17;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
@@ -427,6 +430,39 @@ void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maxim
         settings.setValue(QStringLiteral("window/height"), height);
     }
     settings.setValue(QStringLiteral("window/maximized"), maximized);
+}
+
+void Backend::attachReadingDocument(QObject *textDocument) {
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    if (!quickDocument || !quickDocument->textDocument()) {
+        setStatus(QStringLiteral("Could not attach the reading view."));
+        return;
+    }
+    m_readingDocument = quickDocument->textDocument();
+    m_readingDocument->setUndoRedoEnabled(false);
+    renderReading();
+}
+
+void Backend::renderReading() {
+    if (!m_readingDocument || !m_document)
+        return;
+
+    const QColor background(m_themeBackground);
+    const QColor foreground(m_themeForeground);
+    // A faint wash of the text colour over the page, visible in either mode.
+    const qreal wash = m_darkMode ? 0.12 : 0.08;
+    ReadingRenderer::Style style;
+    style.text = foreground;
+    style.accent = QColor(m_themeAccent);
+    style.shade = QColor::fromRgbF(
+        background.redF() + (foreground.redF() - background.redF()) * wash,
+        background.greenF() + (foreground.greenF() - background.greenF()) * wash,
+        background.blueF() + (foreground.blueF() - background.blueF()) * wash);
+    style.bodyPixelSize = qMax<qreal>(1, qRound(readingBodyPixelSize * m_textScale));
+    style.proseFamily = QStringLiteral("iA Writer Duo S");
+    style.codeFamily = QStringLiteral("iA Writer Mono S");
+    style.fileUrl = m_fileUrl;
+    ReadingRenderer::render(m_readingDocument, currentDocumentText(), style);
 }
 
 void Backend::loadDocumentText(const QString &text) {

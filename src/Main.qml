@@ -47,6 +47,16 @@ ApplicationWindow {
     // the view next moves; an edit alone does not move it.
     property int markedHeading: -1
     property bool markHeld: false
+    // Which view is shown: the rendered page, or the editable text. Every loaded
+    // document opens reading; a new window with nothing to read opens editing.
+    property bool reading: false
+
+    // Until find works in the reading view, the find bar closes when the page is
+    // shown, or its matches would move the hidden text's view.
+    onReadingChanged: {
+        if (reading && searchOpen)
+            closeSearch();
+    }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -106,6 +116,13 @@ ApplicationWindow {
     // the usual rule. Focus stays where it is: a click moves it to the text, Enter
     // in the outline leaves it there.
     function jumpToHeading(index) {
+        // Until the reading view has its own jump, the jump happens in the text.
+        // Focus stays in the outline if it is there, and leaves the hidden page.
+        if (reading) {
+            reading = false;
+            if (reader.activeFocus)
+                editor.forceActiveFocus();
+        }
         var target = Math.min(backend.outline[index].position, editor.length);
         editor.cursorPosition = target;
         var line = editor.positionToRectangle(target);
@@ -137,9 +154,57 @@ ApplicationWindow {
         return found;
     }
 
+    // Nothing is marked while reading until the reading view has its own mark.
     function updateMark() {
-        if (!markHeld)
+        if (reading)
+            markedHeading = -1;
+        else if (!markHeld)
             markedHeading = headingAtTop();
+    }
+
+    // How far down the page the view is, as a share of how far it can scroll.
+    function scrollShare() {
+        return editorFlick.contentY / Math.max(1, editorFlick.contentHeight - editorFlick.height);
+    }
+
+    // Once the newly shown view has its height, bring it to the same share.
+    function restoreScrollShare(share) {
+        Qt.callLater(function() {
+            editorFlick.scrollTo(editorFlick.clampContentY(
+                share * (editorFlick.contentHeight - editorFlick.height)));
+        });
+    }
+
+    // Focus goes back to whichever view is shown.
+    function focusText() {
+        (reading ? reader : editor).forceActiveFocus();
+    }
+
+    function showReading() {
+        var share = scrollShare();
+        backend.renderReading();
+        reading = true;
+        updateMark();
+        reader.forceActiveFocus();
+        restoreScrollShare(share);
+    }
+
+    function showEditing(keepPlace) {
+        var share = scrollShare();
+        reading = false;
+        editor.forceActiveFocus();
+        if (keepPlace)
+            restoreScrollShare(share);
+        updateMark();
+    }
+
+    // The page is built for one theme and size, so a change rebuilds it.
+    function rerenderReading() {
+        if (!reading)
+            return;
+        var share = scrollShare();
+        backend.renderReading();
+        restoreScrollShare(share);
     }
 
     onMarkedHeadingChanged: showMarkInOutline()
@@ -198,7 +263,7 @@ ApplicationWindow {
         editor.deselect();
         searchUpdating = false;
         replaceOpen = false;
-        editor.forceActiveFocus();
+        win.focusText();
     }
 
     Shortcut {
@@ -208,9 +273,18 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+E"
+        context: Qt.WindowShortcut
+        enabled: win.reading || editor.length > 0
+        onActivated: win.reading ? win.showEditing(true) : win.showReading()
+    }
+
+    Shortcut {
         sequence: "Ctrl+H"
         context: Qt.ApplicationShortcut
         onActivated: {
+            if (win.reading)
+                win.showEditing(true);
             searchOpen = true;
             replaceOpen = true;
             searchField.forceActiveFocus();
@@ -221,18 +295,21 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+B"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.wrapSelection("**", "**")
     }
 
     Shortcut {
         sequence: "Ctrl+I"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.wrapSelection("*", "*")
     }
 
     Shortcut {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.insertLink()
     }
 
@@ -275,12 +352,14 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Z"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.undo()
     }
 
     Shortcut {
         sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.redo()
     }
 
@@ -292,9 +371,11 @@ ApplicationWindow {
         enabled: backend.outline.length > 0
         onActivated: {
             if (outlineList.activeFocus) {
-                editor.forceActiveFocus();
+                win.focusText();
                 return;
             }
+            if (win.reading)
+                win.showEditing(true);
             outlineList.currentIndex = Math.max(0, win.markedHeading);
             outlineList.positionViewAtIndex(outlineList.currentIndex, ListView.Contain);
             outlineList.forceActiveFocus();
@@ -305,6 +386,8 @@ ApplicationWindow {
         sequence: "Ctrl+F"
         context: Qt.ApplicationShortcut
         onActivated: {
+            if (win.reading)
+                win.showEditing(true);
             searchOpen = true;
             searchField.forceActiveFocus();
             searchField.selectAll();
@@ -337,9 +420,23 @@ ApplicationWindow {
 
         // A freshly loaded document is read from its first line. Without this the
         // caret is left at the end of the new text and the view follows it there.
+        // It opens in the reading view, which takes the focus the text had.
         function onDocumentLoaded() {
             editor.cursorPosition = 0;
+            backend.renderReading();
+            win.reading = true;
+            win.updateMark();
+            if (editor.activeFocus)
+                reader.forceActiveFocus();
             editorFlick.scrollTo(0);
+        }
+
+        function onThemeColorsChanged() {
+            win.rerenderReading();
+        }
+
+        function onTextScaleChanged() {
+            win.rerenderReading();
         }
 
         // A new outline resets the pane's list to its top, so show the mark again.
@@ -514,11 +611,11 @@ ApplicationWindow {
                 // which leaves the text where it is.
                 Keys.onReturnPressed: win.jumpToHeading(currentIndex)
                 Keys.onEnterPressed: win.jumpToHeading(currentIndex)
-                Keys.onEscapePressed: editor.forceActiveFocus()
+                Keys.onEscapePressed: win.focusText()
                 // Opening a file without headings from here leaves nothing to select.
                 onCountChanged: {
                     if (count === 0 && activeFocus)
-                        editor.forceActiveFocus();
+                        win.focusText();
                 }
 
                 delegate: Rectangle {
@@ -562,7 +659,7 @@ ApplicationWindow {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             win.jumpToHeading(index);
-                            editor.forceActiveFocus();
+                            win.focusText();
                         }
                     }
                 }
@@ -592,7 +689,8 @@ ApplicationWindow {
             anchors.rightMargin: 24
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: Math.max(height, editor.y
+                + (win.reading ? reader.implicitHeight : editor.implicitHeight) + 220)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -782,6 +880,7 @@ ApplicationWindow {
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
+                visible: !win.reading
                 x: Math.round((editorFlick.width - width) / 2)
                 y: Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
@@ -1045,6 +1144,36 @@ ApplicationWindow {
                     backend.attachDocument(textDocument);
                     forceActiveFocus();
                 }
+            }
+
+            // The rendered page. The backend fills its document from the text; it
+            // is never edited, and nothing in it is written back.
+            TextEdit {
+                id: reader
+                objectName: "readingView"
+                visible: win.reading
+                x: editor.x
+                y: editor.y
+                width: editor.width
+                textFormat: TextEdit.RichText
+                wrapMode: TextEdit.Wrap
+                readOnly: true
+                selectByMouse: true
+                color: win.textColor
+                selectedTextColor: win.strongTextColor
+                selectionColor: win.selectionFill
+                font.family: "iA Writer Duo S"
+                font.pixelSize: win.editorFontPixelSize
+                renderType: editor.renderType
+                onLinkActivated: function(link) {
+                    backend.openExternalUrl(link);
+                }
+
+                HoverHandler {
+                    cursorShape: reader.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor
+                }
+
+                Component.onCompleted: backend.attachReadingDocument(textDocument)
             }
         }
 
