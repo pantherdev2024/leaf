@@ -14,6 +14,11 @@ public:
     void setColors(const QString &background, const QString &foreground, const QString &accent);
     void setSearch(const QString &query, int currentMatchStart);
 
+    // Front matter's extent depends on a closing line further down, which a
+    // line-by-line restyle cannot see change. The core calls this after edits;
+    // it restyles only when the extent moved.
+    void refreshFrontMatter();
+
     struct Span {
         int start;
         int length;
@@ -37,7 +42,8 @@ protected:
 
 private:
     void rebuildFormats();
-    void highlightMarkers(const QString &text);
+    int findFrontMatterEnd() const;
+    void highlightMarkers(const QString &text, bool heading);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
 
@@ -55,6 +61,8 @@ private:
     QTextCharFormat m_linkFormat;
     QString m_searchQuery;
     int m_currentMatchStart = -1;
+    int m_frontMatterEndLine = -1;
+    bool m_frontMatterMoved = false;
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
 };

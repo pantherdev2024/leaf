@@ -21,7 +21,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
-    Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
+    Q_PROPERTY(int wordCount READ wordCount NOTIFY statsChanged)
+    Q_PROPERTY(int lineCount READ lineCount NOTIFY statsChanged)
+    Q_PROPERTY(int tokenEstimate READ tokenEstimate NOTIFY statsChanged)
+    Q_PROPERTY(int sectionCount READ sectionCount NOTIFY statsChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
     Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
@@ -41,6 +44,9 @@ public:
     bool modified() const { return m_modified; }
     QString status() const { return m_status; }
     int wordCount() const { return m_wordCount; }
+    int lineCount() const { return m_lineCount; }
+    int tokenEstimate() const { return m_tokenEstimate; }
+    int sectionCount() const { return m_sectionCount; }
     bool darkMode() const { return m_darkMode; }
     void setDarkMode(bool darkMode);
     qreal textScale() const { return m_textScale; }
@@ -50,6 +56,8 @@ public:
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
     static int countWords(const QString &text);
+    static int countLines(const QString &text);
+    static int estimateTokens(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
 
@@ -79,7 +87,7 @@ signals:
     void fileUrlChanged();
     void modifiedChanged();
     void statusChanged();
-    void wordCountChanged();
+    void statsChanged();
     void darkModeChanged();
     void textScaleChanged();
     void themeColorsChanged();
@@ -98,9 +106,8 @@ private:
     void saveTo(const QUrl &url);
     QUrl suggestedSaveUrl() const;
     QString currentDocumentText() const;
-    void setWordCount(int words);
-    void refreshWordCount();
-    void scheduleWordCount();
+    void recount(const QString &text);
+    void scheduleRecount();
     void applyDocumentTypography();
     void reapplyTypographyToChange();
     void scheduleRecovery();
@@ -116,6 +123,9 @@ private:
     bool m_modified = false;
     QString m_status;
     int m_wordCount = 0;
+    int m_lineCount = 0;
+    int m_tokenEstimate = 0;
+    int m_sectionCount = 0;
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
     bool m_loading = false;
@@ -124,7 +134,7 @@ private:
     int m_formattedBlockCount = 0;
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;
-    QTimer m_wordCountTimer;
+    QTimer m_recountTimer;
     QTimer m_recoveryTimer;
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;

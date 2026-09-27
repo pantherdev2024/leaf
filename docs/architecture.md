@@ -77,9 +77,9 @@ not style or display anything.
 **Outline** and **Stats.** New. Both are derived from the structure scan and the text
 by the core, and exposed to the window: the outline as the ordered list of headings
 with their levels and character positions in the text, the stats as words, lines, estimated tokens and
-sections. They are recomputed on a short delay after typing stops, as the word count
-is today, so a burst of typing does not re-derive them on every key. Neither holds
-anything the text does not already say.
+sections. One recount runs the scan once and derives both, at once on load and
+120 ms after typing stops, so a burst of typing does not re-derive them on every
+key. Neither holds anything the text does not already say.
 
 **Highlighter.** Styles the text in place: headings, bold, italic, links, code, block
 quotes and search matches, and hides inline markers away from the cursor. It remains

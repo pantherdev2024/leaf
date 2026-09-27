@@ -32,6 +32,7 @@
 #include <algorithm>
 
 #include "markdownhighlighter.h"
+#include "structurescan.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
@@ -91,9 +92,15 @@ Backend::Backend(QObject *parent) : QObject(parent) {
             }
         }
     }
-    m_wordCountTimer.setSingleShot(true);
-    m_wordCountTimer.setInterval(120);
-    connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
+    m_recountTimer.setSingleShot(true);
+    m_recountTimer.setInterval(120);
+    connect(&m_recountTimer, &QTimer::timeout, this,
+            [this]() {
+                recount(currentDocumentText());
+                // Loading restyles the whole document, so only edits need this.
+                if (m_highlighter)
+                    m_highlighter->refreshFrontMatter();
+            });
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
@@ -354,7 +361,7 @@ bool Backend::editorTextChanged() {
         m_formattedBlockCount = blockCount;
     }
 
-    scheduleWordCount();
+    scheduleRecount();
     setModified(true);
     setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
@@ -434,8 +441,9 @@ void Backend::loadDocumentText(const QString &text) {
     m_loading = false;
 
     applyDocumentTypography();
-    m_wordCountTimer.stop();
-    setWordCount(countWords(text));
+    m_recountTimer.stop();
+    // The figures describe the text as the editor holds it, as after any edit.
+    recount(currentDocumentText());
     emit documentLoaded();
 }
 
@@ -703,20 +711,39 @@ QString Backend::suggestedFileName(const QString &text) {
     return name;
 }
 
-void Backend::setWordCount(int words) {
-    if (m_wordCount == words)
-        return;
-
-    m_wordCount = words;
-    emit wordCountChanged();
+int Backend::countLines(const QString &text) {
+    if (text.isEmpty())
+        return 0;
+    // A line break at the very end closes the last line rather than starting one.
+    return text.count(QLatin1Char('\n')) + (text.endsWith(QLatin1Char('\n')) ? 0 : 1);
 }
 
-void Backend::refreshWordCount() {
-    setWordCount(countWords(currentDocumentText()));
+int Backend::estimateTokens(const QString &text) {
+    // About four characters to a token, halves rounded up.
+    return (text.length() + 2) / 4;
 }
 
-void Backend::scheduleWordCount() {
-    m_wordCountTimer.start();
+// Everything derived from the text is worked out here, from one scan, so the
+// figures cannot disagree with each other.
+void Backend::recount(const QString &text) {
+    const StructureScan::Structure structure = StructureScan::scan(text);
+    const int words = countWords(text);
+    const int lines = countLines(text);
+    const int tokens = estimateTokens(text);
+    const int sections = structure.headings.size();
+
+    if (words != m_wordCount || lines != m_lineCount || tokens != m_tokenEstimate
+            || sections != m_sectionCount) {
+        m_wordCount = words;
+        m_lineCount = lines;
+        m_tokenEstimate = tokens;
+        m_sectionCount = sections;
+        emit statsChanged();
+    }
+}
+
+void Backend::scheduleRecount() {
+    m_recountTimer.start();
 }
 
 void Backend::applyDocumentTypography() {

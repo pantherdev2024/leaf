@@ -6,10 +6,16 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
 #include <QStandardPaths>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QTextLayout>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "structurescan.h"
 
 class LeafTest : public QObject {
     Q_OBJECT
@@ -31,6 +37,101 @@ private slots:
         QCOMPARE(Backend::countWords(QStringLiteral("one two-three don't 42")), 4);
         QCOMPARE(Backend::countWords(QStringLiteral("你好 世界")), 2);
         QCOMPARE(Backend::countWords(QString()), 0);
+    }
+
+    void countsLines() {
+        QCOMPARE(Backend::countLines(QString()), 0);
+        QCOMPARE(Backend::countLines(QStringLiteral("one")), 1);
+        QCOMPARE(Backend::countLines(QStringLiteral("one\n")), 1);
+        QCOMPARE(Backend::countLines(QStringLiteral("one\ntwo")), 2);
+        QCOMPARE(Backend::countLines(QStringLiteral("one\n\nthree\n")), 3);
+    }
+
+    void estimatesTokensAtFourCharactersEachRoundingHalvesUp() {
+        QCOMPARE(Backend::estimateTokens(QString()), 0);
+        QCOMPARE(Backend::estimateTokens(QStringLiteral("12345")), 1);
+        QCOMPARE(Backend::estimateTokens(QStringLiteral("123456")), 2);
+        QCOMPARE(Backend::estimateTokens(QStringLiteral("1234567890")), 3);
+    }
+
+    void showsStatsOfALoadedDocumentAtOnce() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("stats.md")),
+                                       statsDocument());
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        // Front matter counts toward words, lines and tokens; the fenced # line is
+        // not a section.
+        QCOMPARE(backend.wordCount(), 5);
+        QCOMPARE(backend.lineCount(), 8);
+        QCOMPARE(backend.tokenEstimate(), 12);
+        QCOMPARE(backend.sectionCount(), 2);
+    }
+
+    void countsWindowsLineEndingsAsTheEditorHoldsThem() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QString crlf = statsDocument();
+        crlf.replace(QLatin1Char('\n'), QStringLiteral("\r\n"));
+        const QString path = writeFile(directory.filePath(QStringLiteral("crlf.md")), crlf);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        QCOMPARE(backend.lineCount(), 8);
+        QCOMPARE(backend.tokenEstimate(), 12);
+        QCOMPARE(backend.sectionCount(), 2);
+    }
+
+    void updatesStatCardsAfterAnEdit() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("stats.md")),
+                                       statsDocument());
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(cardText(window.data(), "sections"), QStringLiteral("2"));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QTextDocument *document =
+            editor->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTextCursor cursor(document);
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QStringLiteral("# Three\n"));
+
+        QTRY_COMPARE(cardText(window.data(), "sections"), QStringLiteral("3"));
+        QCOMPARE(cardText(window.data(), "words"), QStringLiteral("6"));
+        QCOMPARE(cardText(window.data(), "lines"), QStringLiteral("9"));
+        QCOMPARE(cardText(window.data(), "tokens"), QStringLiteral("≈ 14"));
+    }
+
+    void writesCardNumbersWithCommas() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("long.md")),
+                                       QStringLiteral("word ").repeated(1234));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        QCOMPARE(cardText(window.data(), "words"), QStringLiteral("1,234"));
+        QCOMPARE(cardText(window.data(), "tokens"), QStringLiteral("≈ 1,543"));
     }
 
     void normalizesLinks() {
@@ -59,6 +160,161 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+    }
+
+    void findsHeadingsWithLevelsTextAndPositions() {
+        const auto structure = StructureScan::scan(
+            QStringLiteral("# One\ntext\n### Three\n######\tSix\n"));
+        QCOMPARE(structure.headings.size(), 3);
+        QCOMPARE(structure.headings.at(0).level, 1);
+        QCOMPARE(structure.headings.at(0).text, QStringLiteral("One"));
+        QCOMPARE(structure.headings.at(0).line, 0);
+        QCOMPARE(structure.headings.at(0).position, 0);
+        QCOMPARE(structure.headings.at(1).level, 3);
+        QCOMPARE(structure.headings.at(1).text, QStringLiteral("Three"));
+        QCOMPARE(structure.headings.at(1).line, 2);
+        QCOMPARE(structure.headings.at(1).position, 11);
+        QCOMPARE(structure.headings.at(2).level, 6);
+        QCOMPARE(structure.headings.at(2).text, QStringLiteral("Six"));
+        QCOMPARE(structure.headings.at(2).position, 21);
+        QCOMPARE(structure.frontMatterEndLine, -1);
+    }
+
+    void leavesOutLinesThatAreNotHeadings() {
+        const auto structure = StructureScan::scan(
+            QStringLiteral("#x\n####### seven\n # indented\nplain"));
+        QCOMPARE(structure.headings.size(), 0);
+    }
+
+    void ignoresHeadingsInsideFencedCode() {
+        const auto structure = StructureScan::scan(QStringLiteral(
+            "```python\n# comment\n```\n~~~\n# tilde\n~~~\n# After"));
+        QCOMPARE(headingTexts(structure), QStringList{QStringLiteral("After")});
+        QCOMPARE(structure.headings.at(0).line, 6);
+    }
+
+    void closesFenceOnlyWithSameCharacterAtLeastAsLong() {
+        const auto structure = StructureScan::scan(QStringLiteral(
+            "````\n```\n# inside\n~~~~\n# inside too\n````\t\n# inside still\n```` \n# After"));
+        QCOMPARE(headingTexts(structure), QStringList{QStringLiteral("After")});
+    }
+
+    void opensFencesOnlyWithUpToThreeSpacesOfIndent() {
+        const auto structure = StructureScan::scan(QStringLiteral(
+            "   ```\n# inside\n   ```\n    ```\n# After\n```x```\n# Last"));
+        QCOMPARE(headingTexts(structure),
+                 (QStringList{QStringLiteral("After"), QStringLiteral("Last")}));
+    }
+
+    void hidesHeadingsAfterAnUnclosedFence() {
+        const auto structure = StructureScan::scan(
+            QStringLiteral("# Before\n```\n# Hidden\n# Also hidden"));
+        QCOMPARE(headingTexts(structure), QStringList{QStringLiteral("Before")});
+    }
+
+    void ignoresHeadingsInsideFrontMatter() {
+        const auto dashes = StructureScan::scan(
+            QStringLiteral("--- \ntitle: x\n# not\n---  \n# Real"));
+        QCOMPARE(dashes.frontMatterEndLine, 3);
+        QCOMPARE(headingTexts(dashes), QStringList{QStringLiteral("Real")});
+
+        const auto dots = StructureScan::scan(QStringLiteral("---\n# not\n...\n# Real"));
+        QCOMPARE(dots.frontMatterEndLine, 2);
+        QCOMPARE(headingTexts(dots), QStringList{QStringLiteral("Real")});
+    }
+
+    void readsUnclosedFrontMatterAsMarkdown() {
+        const auto unclosed = StructureScan::scan(QStringLiteral("---\n# Real\ntext"));
+        QCOMPARE(unclosed.frontMatterEndLine, -1);
+        QCOMPARE(headingTexts(unclosed), QStringList{QStringLiteral("Real")});
+
+        const auto notFirst = StructureScan::scan(
+            QStringLiteral("text\n---\n# A\n---\n# B"));
+        QCOMPARE(notFirst.frontMatterEndLine, -1);
+        QCOMPARE(headingTexts(notFirst), (QStringList{QStringLiteral("A"), QStringLiteral("B")}));
+    }
+
+    void drawsHashLinesInCodeAndFrontMatterPlain() {
+        QTextDocument document;
+        // Without a layout, as the editor's document always has, the document does
+        // not report edits and the highlighter never restyles.
+        document.documentLayout();
+        MarkdownHighlighter highlighter(&document);
+        // A new highlighter ignores edits until its first pass, queued on the event loop.
+        QCoreApplication::processEvents();
+        document.setPlainText(QStringLiteral(
+            "---\n# meta\n---\n# Real\n```\n# code\n```\n# After"));
+
+        QVERIFY(!drawnAsHeading(document, 1));
+        QVERIFY(drawnAsHeading(document, 3));
+        QVERIFY(!drawnAsHeading(document, 5));
+        QVERIFY(drawnAsHeading(document, 7));
+    }
+
+    void restylesLinesBelowWhenAFenceIsTypedOrRemoved() {
+        QTextDocument document;
+        // Without a layout, as the editor's document always has, the document does
+        // not report edits and the highlighter never restyles.
+        document.documentLayout();
+        MarkdownHighlighter highlighter(&document);
+        // A new highlighter ignores edits until its first pass, queued on the event loop.
+        QCoreApplication::processEvents();
+        document.setPlainText(QStringLiteral("intro\n# Heading"));
+        QVERIFY(drawnAsHeading(document, 1));
+
+        QTextCursor cursor(&document);
+        cursor.insertText(QStringLiteral("```\n"));
+        QVERIFY(!drawnAsHeading(document, 2));
+
+        cursor.setPosition(0);
+        cursor.setPosition(4, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+        QVERIFY(drawnAsHeading(document, 1));
+    }
+
+    void restylesFrontMatterThatMovedWhileTheFirstLineWasEdited() {
+        QTextDocument document;
+        document.documentLayout();
+        MarkdownHighlighter highlighter(&document);
+        QCoreApplication::processEvents();
+        document.setPlainText(QStringLiteral("---\n---\nx\n# b\n---"));
+        QVERIFY(drawnAsHeading(document, 3));
+
+        // Deleting the first closing line moves the end to the last line, and an edit
+        // to the first line before the refresh must not hide that from it.
+        QTextCursor cursor(document.findBlockByNumber(1));
+        cursor.movePosition(QTextCursor::NextBlock, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+        QTextCursor firstLine(document.firstBlock());
+        firstLine.movePosition(QTextCursor::EndOfBlock);
+        firstLine.insertText(QStringLiteral(" "));
+        highlighter.refreshFrontMatter();
+
+        QVERIFY(!drawnAsHeading(document, 2));
+    }
+
+    void restylesFrontMatterWhenItsClosingLineIsTyped() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("front.md")),
+                                       QStringLiteral("---\n# meta\ntext\n# Real\n"));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QTextDocument *document =
+            editor->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QVERIFY(drawnAsHeading(*document, 1));
+
+        QTextCursor cursor(document->findBlockByNumber(2));
+        cursor.insertText(QStringLiteral("---\n"));
+
+        QTRY_VERIFY(!drawnAsHeading(*document, 1));
+        QVERIFY(drawnAsHeading(*document, 4));
     }
 
     void loadsCurrentOmarchyTheme() {
@@ -334,6 +590,32 @@ private slots:
     }
 
 private:
+    static QStringList headingTexts(const StructureScan::Structure &structure) {
+        QStringList texts;
+        for (const StructureScan::Heading &heading : structure.headings)
+            texts.append(heading.text);
+        return texts;
+    }
+
+    static bool drawnAsHeading(const QTextDocument &document, int line) {
+        const QTextBlock block = document.findBlockByNumber(line);
+        for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
+            if (range.format.fontWeight() == QFont::Bold)
+                return true;
+        }
+        return false;
+    }
+
+    static QString statsDocument() {
+        return QStringLiteral(
+            "---\ntitle: Plan\n---\n# One\n```\n# not\n```\n## Two\n");
+    }
+
+    static QString cardText(QObject *window, const char *name) {
+        QObject *value = window->findChild<QObject *>(QLatin1String(name) + QStringLiteral("Value"));
+        return value ? value->property("text").toString() : QString();
+    }
+
     static QString longDocument(const QString &title) {
         QString text = title + QStringLiteral("\n\n");
         for (int line = 1; line <= 400; ++line)

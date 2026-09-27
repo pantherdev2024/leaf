@@ -80,6 +80,11 @@ ApplicationWindow {
         font.pixelSize: win.editorFontPixelSize
     }
 
+    // Whole numbers with commas between thousands, as the stat cards show them.
+    function formatCount(count) {
+        return Number(count).toLocaleString(Qt.locale("en_US"), 'f', 0);
+    }
+
     // Every hardcoded size in the interface is expressed at text scale 1.
     function scaledSize(pixels) {
         return Math.max(1, Math.round(pixels * win.textScale));
@@ -346,10 +351,63 @@ ApplicationWindow {
     Item {
         anchors.fill: parent
 
+        component StatCard: Rectangle {
+            id: card
+            property string name
+            property string label
+            property string value
+
+            width: statCards.cardWidth
+            height: win.scaledSize(66)
+            radius: 8
+            color: Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.06)
+
+            Column {
+                anchors.centerIn: parent
+                spacing: win.scaledSize(2)
+
+                Label {
+                    objectName: card.name + "Value"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: card.value
+                    color: win.textColor
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(22)
+                }
+
+                Label {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: card.label
+                    // The muted colour is too faint on the card in light themes.
+                    color: Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.6)
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(11)
+                }
+            }
+        }
+
+        Row {
+            id: statCards
+            anchors.top: parent.top
+            anchors.topMargin: win.scaledSize(20)
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: win.scaledSize(12)
+
+            readonly property int cardWidth: Math.floor((win.editorWidth - 3 * spacing) / 4)
+
+            StatCard { name: "words"; label: "Words"; value: win.formatCount(backend.wordCount) }
+            StatCard { name: "lines"; label: "Lines"; value: win.formatCount(backend.lineCount) }
+            StatCard { name: "tokens"; label: "Tokens"; value: "≈ " + win.formatCount(backend.tokenEstimate) }
+            StatCard { name: "sections"; label: "Sections"; value: win.formatCount(backend.sectionCount) }
+        }
+
         Flickable {
             id: editorFlick
             objectName: "editorFlick"
-            anchors.fill: parent
+            anchors.top: statCards.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             clip: true
@@ -362,10 +420,9 @@ ApplicationWindow {
                 // flicking the Flickable, so the bar has to be told about
                 // that activity; linger briefly after the last event.
                 active: hovered || pressed || wheelScroll.running || scrollLinger.running
-                // Stop above the footer strip so the bar doesn't overlap
-                // the word count in the bottom-right corner. Padding and
-                // inset, not anchors: the attached-ScrollBar layout overrides
-                // anchors. Padding stops the thumb, the inset the track.
+                // Stop above the footer strip so the bar stays clear of it.
+                // Padding and inset, not anchors: the attached-ScrollBar layout
+                // overrides anchors. Padding stops the thumb, the inset the track.
                 bottomPadding: win.scaledSize(32)
                 bottomInset: win.scaledSize(32)
             }
@@ -840,18 +897,6 @@ ApplicationWindow {
                 height: win.scaledSize(16)
                 verticalAlignment: Text.AlignVCenter
             }
-        }
-
-        Label {
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 12
-            anchors.bottomMargin: 10
-            text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
-            color: win.mutedColor
-            opacity: 0.75
-            font.family: "iA Writer Mono S"
-            font.pixelSize: win.scaledSize(11)
         }
 
 

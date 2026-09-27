@@ -7,9 +7,11 @@ INCLUDEPATH += ../src
 SOURCES += \
     tst_leaf.cpp \
     ../src/backend.cpp \
-    ../src/markdownhighlighter.cpp
+    ../src/markdownhighlighter.cpp \
+    ../src/structurescan.cpp
 HEADERS += \
     ../src/backend.h \
-    ../src/markdownhighlighter.h
+    ../src/markdownhighlighter.h \
+    ../src/structurescan.h
 
 QT += widgets printsupport quickcontrols2 quickdialogs2 dbus
