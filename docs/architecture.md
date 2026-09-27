@@ -99,7 +99,11 @@ them on to the window and the highlighter. It knows nothing about documents.
 dialog. The core reads the file, keeps its exact bytes as the last known contents,
 loads the text into the editor's document, starts watching the file, and clears any
 recovery snapshot. The highlighter styles the text; the core derives the outline and
-stats; the window places the view at the first line.
+stats. The core then announces that a document was loaded, and the window answers by
+putting the cursor at the start and the view at the first line. Every load passes
+through that one point -- opening, reloading after an outside change, and restoring
+a recovery snapshot -- so all of them start at the top. Without it the cursor is
+left at the end of the new text and the view follows it there.
 
 **Reading and jumping.** Scrolling is the window's alone. As the view moves, the
 window works out which heading is at the top and marks it in the outline. Picking an
@@ -231,6 +235,12 @@ footer says so.
 the interface never hangs; dark mode and text size fall back to the toolkit's own
 guess.
 
+**Setting the Markdown default.** If the desktop refuses it, the install script
+says so and how to set it by hand; Leaf stays installed. Programs that open files with
+`xdg-open` still get the plain-text app for Markdown, because that command guesses a
+file's type from its contents rather than its name; programs that go by the name,
+such as the file manager, get Leaf.
+
 **The Omarchy theme.** The theme file may be missing, malformed or mid-switch. Default
 colours are set before it is read, unrecognised lines are ignored, and the watcher
 re-reads it when the theme changes.
@@ -251,8 +261,9 @@ Built with qmake and make against Qt 6, by a script that finds the right qmake. 
 tests are a Qt Test suite covering the core and the highlighter, which runs headless
 against a real instance of the interface. Leaf reaches the owner as an Arch package
 built locally from the repository. The package installs the program, the icon and a
-desktop entry that declares Markdown files, and Leaf is then set as the owner's
-default application for Markdown. It needs Qt 6 with Qt Quick Controls, the
+desktop entry that declares Markdown files. The install script then records Leaf as
+the owner's default application for Markdown, in the owner's own settings, since the
+package cannot set a per-user default. It needs Qt 6 with Qt Quick Controls, the
 desktop portal with a backend, and, to follow the theme, Omarchy's current-theme state.
 
 ## Not here on purpose

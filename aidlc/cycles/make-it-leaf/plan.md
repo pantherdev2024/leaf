@@ -44,9 +44,9 @@ Leaf is what opens Markdown on the owner's machine. Done when: the spec's verifi
 holds -- after the install script runs, the desktop reports Leaf as the default for
 Markdown and it is written in the owner's own settings; a long `.md` file opened from
 the file manager opens in Leaf at its first line; the launcher shows Leaf with its
-icon; Super+Shift+W opens Leaf; all of this still works with Omawrite uninstalled;
-scrolling feels as before; and a file opened and closed without edits is byte-for-byte
-unchanged. Effort: light.
+icon; Super+Shift+W opens Leaf; scrolling feels as before; and a file opened and
+closed without edits is byte-for-byte unchanged. The check with Omawrite uninstalled
+is not performed, by the owner's choice (scope changes, 2026-09-27). Effort: light.
 Leaves behind: an install script that sets the Markdown default.
 
 - [x] 3-1 make-leaf-default -- the install script sets Leaf as the owner's Markdown default after installing and reports plainly if it cannot; the owner runs it; then, with the owner's go-ahead, Super+Shift+W is pointed at Leaf in the owner's personal key bindings. Done when: a `.md` file from the file manager and Super+Shift+W both open Leaf. Depends on: 1-2, 2-1.

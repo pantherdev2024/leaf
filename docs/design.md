@@ -57,8 +57,9 @@ better tool, and it is not built or packaged for anyone else.
 
 **Open and read.** The owner opens a Markdown file, from the file manager, from a
 terminal or from inside Leaf. The window shows the stats across the top, the outline
-on the left and the text from its first line. They read by scrolling, and the outline
-follows, marking the section they are in.
+on the left and the text from its first line. Reloading after the file changes on
+disk, or recovering after a crash, also starts from the first line. They read by
+scrolling, and the outline follows, marking the section they are in.
 
 **Jump to a section.** Without touching the mouse, the owner moves into the outline,
 steps through the headings with the arrow keys, and picks one. The text jumps
@@ -73,7 +74,10 @@ a change on disk replaces local edits, a prompt before closing unsaved work.
 
 - Runs on Omarchy (Arch Linux, Hyprland), and follows the system's dark or light mode,
   the live Omarchy theme and the desktop text size, as Omawrite does.
-- Replaces Omawrite on the owner's machine, and is the default app for Markdown files.
+- Replaces Omawrite on the owner's machine. Installing Leaf makes it the owner's
+  default app for Markdown files, and only for Markdown; plain text keeps its own
+  default. Super+Shift+W, Omarchy's key for its writing app, opens Leaf; that is set
+  in the owner's own desktop configuration, not shipped by Leaf.
 - A complete break from Omawrite: its own name, icon and package. Omawrite's later
   changes are not pulled in.
 - Keeps everything Omawrite had at the fork: its protections for the owner's work, its
@@ -140,6 +144,8 @@ are not good enough.
 - Pulling in Omawrite's later changes.
 - Publishing or packaging Leaf for anyone but the owner.
 - New writing tools beyond those Omawrite already has.
+- Making the `xdg-open` command hand Markdown to Leaf. It guesses types from file
+  contents and sends Markdown to the plain-text app, as it did for Omawrite.
 
 ## Success criteria
 

@@ -1,7 +1,8 @@
 ---
 type: state
 description: Leaf gets its own identity, becomes the default Markdown app, and opens every file at the top.
-status: active
+status: closed
+closed: 2026-09-27
 opened: 2026-09-27
 mode: run
 ---
@@ -10,12 +11,12 @@ mode: run
 
 ## Where we are
 
-All three phases done: slices 1-1, 1-2, 2-1 and 3-1 closed. The cycle is not yet
-closed; the design's additions are not yet reconciled.
+Closed 2026-09-27. All four slices done; the spec's verification performed; the
+foundation documents reconciled.
 
 ## Next
 
-Close the cycle with `close-work`.
+Nothing. This cycle is closed.
 
 ## Done
 
@@ -26,16 +27,16 @@ Close the cycle with `close-work`.
 
 ## For a cold session
 
-- Two spec checks were not met, both by the owner's choice, recorded in slice 3-1's
-  notes: `xdg-open` still hands `.md` files to Neovim (as it did with Omawrite), and
-  the check with Omawrite uninstalled was skipped because the owner keeps Omawrite
-  for now. Close-work must reconcile the spec's "desktop's open command" line and the
-  design with these.
-- The design takes the spec's three additions at close: reload starts at the top,
-  Super+Shift+W opens Leaf, and the install script sets the Markdown default.
-- One unreproduced observation to watch: an unedited file once opened marked
-  "Unsaved" (slice 3-1 notes).
-- Leaf 0.1.0 is installed on the owner's machine from this working tree. Nothing
-  from this cycle is committed yet; the work sits on branch `foundation-docs` on top
-  of the committed foundation documents. Commit only when the owner asks.
-- The owner prefers plain, non-technical language in conversation.
+- Delivered: Leaf's own identity and icon, every load starting at the first line, and
+  `bin/install` making Leaf the Markdown default; Super+Shift+W opens Leaf through
+  the owner's own Hyprland bindings.
+- Two spec checks were settled by the owner's choice, recorded in `scope-changes.md`:
+  `xdg-open` still hands `.md` files to Neovim (now in the design's *Not in scope*),
+  and the check with Omawrite uninstalled was not performed because the owner keeps
+  Omawrite for now.
+- The spec's open question, the icon's look, was answered in slice 1-2.
+- Left for later, as the owner noted during the brainstorm: keeping the reading place
+  on reload, and the prompt that appears on every outside change even with no local
+  edits.
+- One unreproduced observation: an unedited file once opened marked "Unsaved" (slice
+  3-1 notes). Watch for it.

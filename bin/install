@@ -14,8 +14,8 @@ fi
 cd "$PKGBUILD_DIR"
 makepkg -fsi "$@"
 
-# Omawrite is the Markdown default only because nothing else claims Markdown, so
-# record Leaf explicitly in the user's own settings. A failure here leaves Leaf
+# Without an explicit default, Markdown goes to whichever installed app claims it,
+# so record Leaf in the user's own settings. A failure here leaves Leaf
 # installed; it can still be set as the default by hand.
 if xdg-mime default leaf.desktop text/markdown text/x-markdown \
     && [ "$(xdg-mime query default text/markdown)" = "leaf.desktop" ]; then

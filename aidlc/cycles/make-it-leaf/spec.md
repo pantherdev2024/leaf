@@ -66,8 +66,9 @@ says Leaf keeps its own settings and recovery data and does not carry Omawrite's
 - The repository's install script already builds Leaf and installs it as a package.
   It now also, after installing, makes Leaf the owner's default application for
   Markdown files. Installing the package by other means does not set the default;
-  the setting belongs to the owner, not to the package. Opening a `.md` file from the file manager, or with the desktop's
-  "open" command, opens it in Leaf.
+  the setting belongs to the owner, not to the package. Opening a `.md` file from
+  the file manager opens it in Leaf. The `xdg-open` command is left as it was; see
+  *Not in scope*.
 - Running the install script again leaves it set the same way; it does no harm to
   repeat.
 - Leaf still offers itself for plain text files under "Open with", as Omawrite did,
@@ -110,6 +111,9 @@ says Leaf keeps its own settings and recovery data and does not carry Omawrite's
 - Carrying over Omawrite's settings or recovery data.
 - Removing Omawrite. The owner uninstalls it when ready.
 - Making Leaf the default for plain text files.
+- Making the `xdg-open` command hand Markdown to Leaf. It guesses types from file
+  contents and sends Markdown to the plain-text app, as it did for Omawrite (scope
+  change, 2026-09-27).
 - Publishing Leaf to any package repository, or updating it automatically.
 - The outline, the stat cards and table or code formatting, which are later cycles.
 
@@ -130,7 +134,8 @@ says Leaf keeps its own settings and recovery data and does not carry Omawrite's
     line.
   - The launcher shows Leaf with its new icon.
   - Super+Shift+W opens a Leaf window.
-- With Omawrite uninstalled, all of the above still works.
+- With Omawrite uninstalled, all of the above still works. Not performed: the owner
+  keeps Omawrite installed for now (scope change, 2026-09-27).
 - Scrolling by wheel, keys and scroll bar, and the view following the cursor while
   typing, feel as before when tried by hand, and the existing tests still pass.
 - A file opened and closed in Leaf without edits is byte-for-byte unchanged.

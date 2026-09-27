@@ -58,3 +58,11 @@ do not act past it.
 - Do not run `bin/install` from a session: it runs `makepkg -fsi`, which asks for
   sudo and installs a system package. Use `bin/build` and `build/leaf <file>`
   to try the app.
+- To check the app on screen from a session: launch `build/leaf <file>`, find its
+  window in `hyprctl clients -j`, and capture it with `grim -g`. Close it with
+  `hyprctl dispatch 'hl.dsp.window.close({ window = "pid:<pid>" })'`; killing the
+  process skips saving settings and leaves a recovery lock behind. Keys sent with
+  `wtype` reach the app but not Hyprland's own shortcuts.
+- `xdg-open file.md` opens Neovim, not Leaf: it guesses types from contents. Test the
+  Markdown default with `gio open`, which goes by the file name, as the file manager
+  does.
