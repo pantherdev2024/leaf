@@ -38,7 +38,7 @@ testable on its own. In the window, the **reading view** showing that document
 read-only, and one property saying which view is shown, which every later feature
 reads.
 
-- [ ] 1-1 reading-renderer -- Build the renderer: the display copy, Qt's import, and
+- [x] 1-1 reading-renderer -- Build the renderer: the display copy, Qt's import, and
   restyling of headings, paragraphs, lists, task lists, quotes, rules, inline code,
   links and images (local only) from a style; measure its speed on a 5,000-line file
   and check nested lists in tables and other HTML on real files. Done when: tests

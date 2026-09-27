@@ -14,9 +14,12 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextLayout>
+#include <QTextList>
+#include <QTextTable>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "readingrenderer.h"
 #include "structurescan.h"
 
 class LeafTest : public QObject {
@@ -1100,7 +1103,222 @@ private slots:
         backend.discardRecovery();
     }
 
+    void displayCopyBlanksFrontMatterLineForLine() {
+        QCOMPARE(ReadingRenderer::displayCopy(QStringLiteral("---\ntype: x\n---\n# Title\n")),
+                 QStringLiteral("\n\n\n# Title\n"));
+    }
+
+    void displayCopyKeepsAFirstRuleThatNeverCloses() {
+        const QString text = QStringLiteral("---\nnot front matter\n");
+        QCOMPARE(ReadingRenderer::displayCopy(text), text);
+    }
+
+    void displayCopyBlanksTagLinesOutsideCodeOnly() {
+        const QString text = QStringLiteral(
+            "<task>\nDo it.\n</output_format>\n  <example type=\"bad\">  \n"
+            "```\n<task>\n```\nSee <b>this</b>\n<b>bold</b> text\n");
+        QCOMPARE(ReadingRenderer::displayCopy(text),
+                 QStringLiteral("\nDo it.\n\n\n```\n<task>\n```\nSee <b>this</b>\n<b>bold</b> text\n"));
+    }
+
+    void displayCopyClosesVoidTagsOutsideCode() {
+        const QString text = QStringLiteral(
+            "| a<br>b | c<BR>d |\nrule <hr> and <img src=\"x.png\" alt=\"x\"> and <br/>\n"
+            "keep `<br>` here and <bra>\n```\n<br>\n```\n## Title<br>\n");
+        QCOMPARE(ReadingRenderer::displayCopy(text), QStringLiteral(
+            "| a<br/>b | c<BR/>d |\nrule <hr/> and <img src=\"x.png\" alt=\"x\"/> and <br/>\n"
+            "keep `<br>` here and <bra>\n```\n<br>\n```\n## Title<br/>\n"));
+    }
+
+    void rendersEverythingAfterABreakInATableCell() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "| A | B |\n|---|---|\n| x<br>y | z |\n| two | w |\n\nAfter the table.\n"),
+            readingStyle());
+        QVERIFY(findRenderedBlock(document, QStringLiteral("two")).isValid());
+        QVERIFY(findRenderedBlock(document, QStringLiteral("After the table.")).isValid());
+    }
+
+    void rendersAListAndATableAfterATagLineWhole() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "---\ntype: workflow\n---\n\n# Brainstorm\n\n<context>\n\n"
+            "- first item\n- second item\n\n"
+            "| Kind | Feeds |\n|---|---|\n| cycle | a spec |\n\n</context>\n"), readingStyle());
+
+        QCOMPARE(findRenderedBlock(document, QStringLiteral("first item")).textList()->count(), 2);
+        QTextTable *table = QTextCursor(findRenderedBlock(document, QStringLiteral("a spec")))
+                                .currentTable();
+        QVERIFY(table);
+        QCOMPARE(table->rows(), 2);
+        QCOMPARE(table->columns(), 2);
+        QVERIFY(!document.toPlainText().contains(QStringLiteral("workflow")));
+        QVERIFY(!document.toPlainText().contains(QStringLiteral("context")));
+    }
+
+    void rendersATagLineBetweenParagraphsAsTwoParagraphs() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("One\n<note>\nTwo\n"), readingStyle());
+        QVERIFY(findRenderedBlock(document, QStringLiteral("One")).isValid());
+        QVERIFY(findRenderedBlock(document, QStringLiteral("Two")).isValid());
+    }
+
+    void rendersHeadingsSteppingDownInSizeInTheTextColour() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "# One\n\n## Two **bold**\n\n### Three\n\nBody\n"), readingStyle());
+
+        QCOMPARE(pixelSizesIn(findRenderedBlock(document, QStringLiteral("One"))), QList<int>{34});
+        // The bold word takes the heading's size, so the whole line is one run.
+        QCOMPARE(pixelSizesIn(findRenderedBlock(document, QStringLiteral("Two bold"))),
+                 QList<int>{26});
+        QCOMPARE(pixelSizesIn(findRenderedBlock(document, QStringLiteral("Three"))), QList<int>{22});
+        const QTextBlock body = findRenderedBlock(document, QStringLiteral("Body"));
+        QCOMPARE(pixelSizesIn(body), QList<int>{17});
+        QCOMPARE(body.begin().fragment().charFormat().foreground().color(), readingStyle().text);
+    }
+
+    void rendersLinksInTheAccentAndInlineCodeInTheCodeFont() {
+        QTextDocument document;
+        const ReadingRenderer::Style style = readingStyle();
+        ReadingRenderer::render(&document, QStringLiteral(
+            "See [site](https://example.com) and `code`.\n"), style);
+
+        const QTextBlock block = document.begin();
+        QTextCharFormat link;
+        QTextCharFormat code;
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            if (it.fragment().text() == QStringLiteral("site"))
+                link = it.fragment().charFormat();
+            if (it.fragment().text() == QStringLiteral("code"))
+                code = it.fragment().charFormat();
+        }
+        QCOMPARE(link.foreground().color(), style.accent);
+        QVERIFY(link.fontUnderline());
+        QCOMPARE(code.fontFamilies().toStringList(), QStringList{style.codeFamily});
+        QCOMPARE(code.background().color(), style.shade);
+    }
+
+    void rendersAWebImageAsItsAlternativeText() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "![a chart](https://example.com/chart.png)\n"), readingStyle());
+        QCOMPARE(document.toPlainText(), QStringLiteral("a chart"));
+        QCOMPARE(imageNames(document), QStringList());
+    }
+
+    void rendersALocalImageFromTheFilesFolder() {
+        QTemporaryDir directory;
+        QImage(2, 2, QImage::Format_RGB32).save(directory.filePath(QStringLiteral("pic.png")));
+        ReadingRenderer::Style style = readingStyle();
+        style.fileUrl = QUrl::fromLocalFile(directory.filePath(QStringLiteral("notes.md")));
+
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("![pic](pic.png)\n"), style);
+        QCOMPARE(imageNames(document),
+                 QStringList{QUrl::fromLocalFile(directory.filePath(QStringLiteral("pic.png"))).toString()});
+    }
+
+    void clearsATaskMarkerQtLeavesOnBlocksAfterTheList() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("- [ ] task\n\nAfter\n"), readingStyle());
+        QCOMPARE(findRenderedBlock(document, QStringLiteral("task")).blockFormat().marker(),
+                 QTextBlockFormat::MarkerType::Unchecked);
+        QCOMPARE(findRenderedBlock(document, QStringLiteral("After")).blockFormat().marker(),
+                 QTextBlockFormat::MarkerType::NoMarker);
+    }
+
+    void listsRenderedHeadingsInOrderAsShown() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "# One\n\n## Use **bold**  and `code`\n\nUnder\n===\n"), readingStyle());
+
+        const QList<ReadingRenderer::RenderedHeading> headings = ReadingRenderer::headings(&document);
+        QCOMPARE(headings.size(), 3);
+        QCOMPARE(headings.at(0).level, 1);
+        QCOMPARE(headings.at(0).text, QStringLiteral("One"));
+        QCOMPARE(headings.at(1).level, 2);
+        QCOMPARE(headings.at(1).text, QStringLiteral("Use bold and code"));
+        QCOMPARE(headings.at(2).level, 1);
+        QCOMPARE(headings.at(2).text, QStringLiteral("Under"));
+        QCOMPARE(document.findBlockByNumber(headings.at(1).block).text().simplified(),
+                 QStringLiteral("Use bold and code"));
+    }
+
+    void spacesACodeBlockFromTheProseButNotBetweenItsLines() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "Before\n\n```\nfirst\nmiddle\nlast\n```\n\nAfter\n"), readingStyle());
+        const QTextBlockFormat first = findRenderedBlock(document, QStringLiteral("first")).blockFormat();
+        const QTextBlockFormat middle = findRenderedBlock(document, QStringLiteral("middle")).blockFormat();
+        const QTextBlockFormat last = findRenderedBlock(document, QStringLiteral("last")).blockFormat();
+        QVERIFY(first.topMargin() > 0);
+        QCOMPARE(first.bottomMargin(), 0.0);
+        QCOMPARE(middle.topMargin(), 0.0);
+        QCOMPARE(middle.bottomMargin(), 0.0);
+        QCOMPARE(last.topMargin(), 0.0);
+        QVERIFY(last.bottomMargin() > 0);
+    }
+
+    void rendersAFiveThousandLineFileQuickly() {
+        QString text;
+        for (int section = 0; section < 270; ++section) {
+            text += QStringLiteral("## Section %1\n\n").arg(section);
+            text += QStringLiteral("Some **prose** with `code` and a [link](https://x.org),\n"
+                                   "wrapped by hand across two lines.\n\n");
+            text += QStringLiteral("- one\n- two\n  - nested\n\n");
+            text += QStringLiteral("| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\n");
+            text += QStringLiteral("```cpp\nint x = 1;\nint y = 2;\n```\n\n");
+        }
+        QVERIFY(text.count(QLatin1Char('\n')) >= 5000);
+
+        QTextDocument document;
+        QElapsedTimer timer;
+        timer.start();
+        ReadingRenderer::render(&document, text, readingStyle());
+        const qint64 elapsed = timer.elapsed();
+        qInfo("Rendered %lld lines in %lld ms", qint64(text.count(QLatin1Char('\n'))), elapsed);
+        QVERIFY2(elapsed < 250, qPrintable(QStringLiteral("took %1 ms").arg(elapsed)));
+    }
+
 private:
+    static ReadingRenderer::Style readingStyle() {
+        ReadingRenderer::Style style;
+        style.text = QColor(QStringLiteral("#222222"));
+        style.accent = QColor(QStringLiteral("#1144aa"));
+        style.shade = QColor(QStringLiteral("#eeeeee"));
+        style.bodyPixelSize = 17;
+        style.proseFamily = QStringLiteral("iA Writer Duo S");
+        style.codeFamily = QStringLiteral("iA Writer Mono S");
+        return style;
+    }
+
+    static QTextBlock findRenderedBlock(const QTextDocument &document, const QString &text) {
+        for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+            if (block.text().simplified() == text)
+                return block;
+        }
+        return {};
+    }
+
+    static QList<int> pixelSizesIn(const QTextBlock &block) {
+        QList<int> sizes;
+        for (auto it = block.begin(); !it.atEnd(); ++it)
+            sizes.append(it.fragment().charFormat().intProperty(QTextFormat::FontPixelSize));
+        return sizes;
+    }
+
+    static QStringList imageNames(const QTextDocument &document) {
+        QStringList names;
+        for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+            for (auto it = block.begin(); !it.atEnd(); ++it) {
+                if (it.fragment().charFormat().isImageFormat())
+                    names.append(it.fragment().charFormat().toImageFormat().name());
+            }
+        }
+        return names;
+    }
+
     static QStringList headingTexts(const StructureScan::Structure &structure) {
         QStringList texts;
         for (const StructureScan::Heading &heading : structure.headings)

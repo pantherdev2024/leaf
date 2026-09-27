@@ -8,10 +8,12 @@ SOURCES += \
     tst_leaf.cpp \
     ../src/backend.cpp \
     ../src/markdownhighlighter.cpp \
+    ../src/readingrenderer.cpp \
     ../src/structurescan.cpp
 HEADERS += \
     ../src/backend.h \
     ../src/markdownhighlighter.h \
+    ../src/readingrenderer.h \
     ../src/structurescan.h
 
 QT += widgets printsupport quickcontrols2 quickdialogs2 dbus

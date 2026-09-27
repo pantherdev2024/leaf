@@ -94,6 +94,10 @@ shown, and rebuilt or thrown away; nothing typed or clicked there changes the te
   attributes, then `>`. For example `<task>`, `</output_format>` and
   `<example type="bad">`. The lines between an opening and a closing tag are shown as
   ordinary Markdown. Inside a code block, tag lines are shown as code.
+- **Void HTML tags** written without a closing slash -- `<br>`, `<hr>`, `<img ...>`,
+  `<input>` and the other HTML elements that never close, in any case -- are shown as
+  if written with one (`<br/>`), outside code blocks and inline code. Qt otherwise
+  drops everything after them. The file is not touched (scope change, 2026-09-27).
 - Each left-out line counts as a blank line, so the paragraphs, lists and tables on
   either side of it stay apart rather than joining.
 - Anything else Leaf does not style specially is shown as Qt reads it. Every line of
@@ -183,6 +187,8 @@ shown, and rebuilt or thrown away; nothing typed or clicked there changes the te
   - the reading view shows unsaved edits after switching back, and is rebuilt after a
     reload;
   - a left-out tag line between two paragraphs leaves them as two paragraphs;
+  - a `<br>` in a table cell leaves the rest of the file on the page, and a `<br>`
+    inside inline code or a code block is shown as written;
   - a heading with bold or inline code in it is matched to its rendered heading;
   - a web image is not fetched.
 - On screen, in Leaf, in dark and light themes:

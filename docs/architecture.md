@@ -101,13 +101,16 @@ typing. It changes how text looks, never what the text is.
 
 **Reading renderer.** New. Builds the reading view's document from the text: takes a
 display copy with the lines Qt's importer misreads left out (front matter, and lines
-that are only an XML-like tag such as `<task>`), imports it with Qt's Markdown support,
-then walks the result and restyles it -- spacing, heading sizes, colours from the
-theme, table borders and header shading, code shading, the language label. It also
-matches each outline entry to its heading in the rendered copy, in order, so the
-outline, the jump and the reading mark work there. It is fed text and theme and
-returns a document; it holds nothing the text does not already say, and nothing it
-builds is ever written anywhere.
+that are only an XML-like tag such as `<task>`) and unclosed void HTML tags such as
+`<br>` closed, imports it with Qt's Markdown support, then walks the result and
+restyles it -- spacing, heading sizes, colours from the theme, table borders and
+header shading, code shading, the language label. Images load only from this
+machine; any other image shows its alternative text. It also lists the rendered
+headings, so each outline entry can be matched to its heading in the rendered copy,
+in order, and the outline, the jump and the reading mark work there. It is fed text
+and a style and fills the document it is given, which belongs to the view showing
+it; it holds nothing the text does not already say, and nothing it builds is ever
+written anywhere.
 
 **System theme.** Reads the desktop's dark-mode and text-size settings through the
 desktop portal and reports changes as they happen. The core receives them and passes
@@ -187,11 +190,14 @@ the editor is what it was.
 ### Why the display copy may leave lines out
 
 Chosen: the renderer imports a copy of the text with front matter and bare tag lines
-left out, rather than the text itself. Qt's importer reads a line such as `<task>` as
-the start of an HTML block and swallows the lists and tables after it, which LLM
-prompt files are full of. The copy is only ever displayed, so leaving lines out of it
-changes nothing on disk and nothing in the editor. This is the only change made to the
-text on its way to the screen; everything else is styling of what the importer built.
+left out, and unclosed void HTML tags closed (`<br>` as `<br/>`), rather than the text
+itself. Qt's importer reads a line such as `<task>` as the start of an HTML block and
+swallows the lists and tables after it, which LLM prompt files are full of, and drops
+everything after an unclosed `<br>`, which LLM tables use for line breaks. The copy is
+only ever displayed, so these changes to it change nothing on disk and nothing in the
+editor. They are the only changes made to the text on its way to the screen, each one
+there because the importer loses content without it; everything else is styling of
+what the importer built.
 Rejected: patching the importer's result afterwards, which cannot recover content the
 importer has already swallowed.
 
