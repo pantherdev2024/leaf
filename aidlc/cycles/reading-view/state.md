@@ -10,14 +10,15 @@ mode: run
 
 ## Where we are
 
-Phase 1, slices 1-1 and 1-2 done. Waiting on the owner: whether to bring 2-1
-(outline in the reading view) forward before 1-3, and whether to restyle toward the
-T3 Code look shown in a mock-up (see 1-2's notes).
+Phase 1, slices 1-1 and 1-2 done. 1-3 tables-and-code not yet detailed. The owner
+chose to keep the plan's order (1-3 before 2-1), 2026-09-27.
 
 ## Next
 
-The owner answers the order question. If 2-1 comes first, record the scope change,
-then `execute-slice` on 2-1; otherwise `execute-slice` on 1-3 tables-and-code.
+Detail and execute slice 1-3 tables-and-code: `execute-slice` on `reading-view`.
+Effort high. Before detailing, ask the owner the open look question in 1-2's notes
+(restyle toward the T3 Code mock-up, or keep today's style and fix the bullets),
+since it decides how tables and code boxes look.
 
 ## Done
 
