@@ -1,6 +1,6 @@
 ---
 type: architecture
-description: A single-window Qt Quick app with a C++ core, in which one editable plain-text document is scanned into structure that drives its styling, its outline and its stats.
+description: A single-window Qt Quick app with a C++ core, in which one editable plain-text document is scanned into structure that drives its styling, its outline and its stats, and is rendered into a throwaway reading view.
 register: project
 ---
 
@@ -16,6 +16,11 @@ code, lined-up tables, the outline, the stats -- is derived from that text and l
 over it, never written back into it. One scan of the text for its block structure
 (headings, code blocks, tables, front matter) feeds the styling, the outline and the
 stats, so the three always agree about what the document contains.
+
+The reading view, where every document opens, is the one exception to drawing over
+the text: it is a **rendered copy**, built from the text by Qt's Markdown importer,
+restyled, shown, and rebuilt or thrown away. It is never saved and never read back,
+so the file's text still has one home, the editor.
 
 ```
   command line,          desktop portal            Omarchy theme files
@@ -35,13 +40,14 @@ stats, so the three always agree about what the document contains.
                             .
                             . same line rules, applied line by line as text changes
                             v
-                       Highlighter
-                            |
-                            v
+                       Highlighter          Reading renderer <- text, theme
+                            |                (rendered copy, never saved)
+                            v                       |
    +-------------------------------- Window --------------------------------+
    |  Stat cards (top)          <- stats from the core                      |
    |  Outline pane (left)       <- outline from the core                    |
-   |  Editor (plain text, styled by the highlighter)                        |
+   |  Reading view (read-only)  <- rendered copy     } one at a time,       |
+   |  Editor (plain text, styled by the highlighter) } Ctrl+E switches      |
    |  Footer (file controls), find and replace, dialogs                     |
    +------------------------------------------------------------------------+
                             |
@@ -54,7 +60,9 @@ stats, so the three always agree about what the document contains.
 **Window.** The whole interface, declared in Qt Quick: the editor, the outline pane,
 the stat cards, the footer, find and replace, the dialogs, the shortcuts and the
 wheel-scrolling behaviour. It owns layout, focus and scroll position, including
-opening every document at its first line and scrolling a picked heading to the top.
+opening every document at its start in the reading view, switching between the
+reading and editing views with Ctrl+E while keeping the place, and scrolling a picked
+heading to the top in either.
 It displays what the core computes and calls the core for anything that touches a
 file. It does not parse Markdown, count anything or touch the filesystem.
 
@@ -91,6 +99,16 @@ a closing line that can be far from an edit, so the highlighter works out its ex
 when it styles the first line, and the core's recount asks it to check again after
 typing. It changes how text looks, never what the text is.
 
+**Reading renderer.** New. Builds the reading view's document from the text: takes a
+display copy with the lines Qt's importer misreads left out (front matter, and lines
+that are only an XML-like tag such as `<task>`), imports it with Qt's Markdown support,
+then walks the result and restyles it -- spacing, heading sizes, colours from the
+theme, table borders and header shading, code shading, the language label. It also
+matches each outline entry to its heading in the rendered copy, in order, so the
+outline, the jump and the reading mark work there. It is fed text and theme and
+returns a document; it holds nothing the text does not already say, and nothing it
+builds is ever written anywhere.
+
 **System theme.** Reads the desktop's dark-mode and text-size settings through the
 desktop portal and reports changes as they happen. The core receives them and passes
 them on to the window and the highlighter. It knows nothing about documents.
@@ -101,8 +119,8 @@ them on to the window and the highlighter. It knows nothing about documents.
 dialog. The core reads the file, keeps its exact bytes as the last known contents,
 loads the text into the editor's document, starts watching the file, and clears any
 recovery snapshot. The highlighter styles the text; the core derives the outline and
-stats. The core then announces that a document was loaded, and the window answers by
-putting the cursor at the start and the view at the first line. Every load passes
+stats; the reading renderer builds the rendered copy. The core then announces that a document was loaded, and the window answers by
+showing the reading view at its start, with the editor's cursor at the start too. Every load passes
 through that one point -- opening, reloading after an outside change, and restoring
 a recovery snapshot -- so all of them start at the top. Without it the cursor is
 left at the end of the new text and the view follows it there.
@@ -116,10 +134,17 @@ between the text and the outline; there, the arrows move a selection without mov
 the text, and Enter jumps while keeping focus in the outline. A picked heading stays
 marked, even one too near the end to reach the top, until the view next moves.
 
+**Switching views.** Ctrl+E swaps the reading view and the editor. The window notes
+the heading at the top of the one being left and brings the same heading, found by
+its place in the outline, to the top of the other. Within a section the place is
+kept as closely as the two layouts allow. The editor is hidden, not destroyed, while
+reading, so its undo history and cursor survive.
+
 **Editing.** A keystroke changes the editor's document. The highlighter restyles the
 changed lines; the core marks the document modified, schedules a recovery snapshot,
 and schedules a recount of the outline and stats. The file on disk is untouched until
-the owner saves.
+the owner saves. The rendered copy is rebuilt from the text when the owner returns to
+the reading view, and after a reload.
 
 **Saving.** The core writes the document's text to a temporary file and atomically
 replaces the target with it, records the written bytes as the last known contents,
@@ -129,7 +154,8 @@ those bytes, so Leaf's own save is not mistaken for an outside edit.
 **Where state lives.** The document's text lives only in the editor's document.
 Recovery snapshots and settings (window size, last save folder) live in Leaf's own
 per-user state directory. Theme colours are read from Omarchy's state and held in the
-core. The outline, stats and styling are always derived and never stored.
+core. The outline, stats, styling and the rendered copy
+are always derived and never stored.
 
 ## Decisions
 
@@ -143,26 +169,50 @@ draws tables well but means rewriting most of the interface and carrying a brows
 engine. Reversing it is a rewrite of the Window; the core's file handling could be
 kept behind a web view.
 
+### Why reading is a rendered copy beside the editor
+
+Chosen: every document opens in a read-only reading view, a document Qt's Markdown
+importer builds from the text and Leaf restyles, and the editor stays as the editing
+view, one key away. The design chose this (approach D) because styled raw text still
+reads as raw Markdown -- visible marks, lines broken mid-sentence, no grids -- and no
+styling can join lines or draw grids without changing the text. The rendered copy is
+safe for the same reason printing is: it is built, shown and thrown away, never saved
+and never read back into the text. Rejected: drawing grids and boxes over the
+editable text (the earlier plan for approach A), which cannot fix wrapped lines;
+building a view from Leaf's own widgets block by block, which gives full control at a
+much higher cost and stays open for any part the importer falls short on; a web engine,
+as before. Reversing it is contained: remove the reading view and the renderer, and
+the editor is what it was.
+
+### Why the display copy may leave lines out
+
+Chosen: the renderer imports a copy of the text with front matter and bare tag lines
+left out, rather than the text itself. Qt's importer reads a line such as `<task>` as
+the start of an HTML block and swallows the lists and tables after it, which LLM
+prompt files are full of. The copy is only ever displayed, so leaving lines out of it
+changes nothing on disk and nothing in the editor. This is the only change made to the
+text on its way to the screen; everything else is styling of what the importer built.
+Rejected: patching the importer's result afterwards, which cannot recover content the
+importer has already swallowed.
+
 ### Why the editor holds the file's text, not a rendered document
 
 Chosen: the editor holds plain text, and all formatting is styling laid over it.
 This is what guarantees Leaf never reformats a file: what is saved is exactly what is
 in the editor, which is exactly what was opened plus the owner's edits. Rejected: a
 rich document built from the Markdown and written back out on save (the design's
-approach C), which rewrites the file's Markdown in the toolkit's style. Printing is the
-one place a rendered copy is built, because it is thrown away after printing and never
-saved. Reversing this would put every file at risk of being rewritten, and would need
+approach C), which rewrites the file's Markdown in the toolkit's style. Printing and the
+reading view are the places a rendered copy is built, because it is thrown away and
+never saved. Reversing this would put every file at risk of being rewritten, and would need
 a round-trip guarantee the toolkit does not give.
 
 ### Why formatting only changes how text is drawn
 
-Chosen: lined-up table columns, shaded code blocks and, later, drawn grids and boxes
-are produced by display properties -- colours, spacing, backgrounds, shapes painted
+Chosen: in the editing view, styling is produced by display properties -- colours, spacing, backgrounds, shapes painted
 over the text -- and never by inserting or removing characters. Inserting padding to
 align a table would change the file on save. Rejected: normalising tables on open.
-Reversing it would break the never-reformat rule. Which display property lines up
-table columns, and how the later grids and boxes are drawn, are left to the cycles
-that build them.
+Reversing it would break the never-reformat rule. Grids and boxes are drawn in the
+reading view instead, from its rendered copy.
 
 ### Why one structure scan feeds the highlighter, the outline and the stats
 
@@ -177,7 +227,9 @@ Chosen: a line scanner for the handful of block types Leaf needs. Headings, fenc
 code, tables and front matter are recognisable line by line, and the scan must report
 positions in the editor's own text, which a library that builds its own tree would
 need mapping back to. Qt reads Markdown only into its own rich document, not as
-positions in plain text. Rejected: adding a
+positions in plain text; that is why Qt's importer builds the reading view, where no
+positions are needed, but not the outline, whose entries are then matched to the
+rendered headings in order. Rejected: adding a
 full Markdown parser as a dependency. Reversing it is contained: the scan's output
 shape stays, and a library could produce it instead.
 
@@ -249,6 +301,13 @@ such as the file manager, get Leaf.
 colours are set before it is read, unrecognised lines are ignored, and the watcher
 re-reads it when the theme changes.
 
+**The reading view.** Anything Qt's importer cannot render well is still shown as
+text, never dropped, apart from the front matter and tag lines left out on purpose.
+If the outline and the rendered headings disagree -- a heading the importer reads that
+the scan does not, such as one underlined with `===` -- entries are matched in order
+by level and text, and an entry with no match jumps nowhere rather than to the wrong
+place.
+
 **Unusual documents.** A file with no headings has an empty outline, which the pane
 says, and a section count of zero. Front matter is left out of the outline but
 counted in words, lines and tokens; a first line of `---` with no closing line is not
@@ -273,10 +332,10 @@ desktop portal with a backend, and, to follow the theme, Omarchy's current-theme
 
 ## Not here on purpose
 
-- No Markdown library and no web engine. The block types Leaf needs are few and
-  line-based, and the editor is native Qt.
-- No rendered view and no separate reading mode. The one editable view is the
-  reading view.
+- No Markdown library beyond Qt's own, and no web engine. The block types the
+  outline and styling need are few and line-based, the reading view uses the importer
+  Qt already ships, and the interface is native Qt.
+- No editing in the reading view, and no rendered copy that is ever saved.
 - No reformatting, normalising or correcting of files, ever.
 - No file browser, tabs or multi-document state.
 - No network access. External links are handed to the desktop to open.

@@ -54,17 +54,28 @@ better tool, and it is not built or packaged for anyone else.
   not an exact count for any model. Sections is the number of headings. All four
   describe the whole text, front matter included, and replace the old word count in
   the corner.
-- **Formatted block** -- a table or a code block, drawn so it reads as a table or a
-  code box rather than as the raw Markdown behind it. Where the cursor is, the raw
-  text shows so it can be edited.
+- **Reading view** -- how every document opens: the Markdown drawn as a finished
+  page, with no `#` marks, `---` lines or fences showing, hard-wrapped lines joined
+  back into paragraphs, tables as grids and code as boxes. It only displays; nothing
+  typed there reaches the file. Front matter and tag lines such as `<task>`, which are
+  written for tools rather than people, are left out of it.
+- **Editing view** -- the file's own text, always editable, with styling laid over
+  it, as in Omawrite. One key, Ctrl+E, switches between the two views, and the place
+  being read is kept.
+- **Formatted block** -- a table or a code block in the reading view. A table is a
+  grid with a shaded header row and its columns aligned as the file says; a table too
+  wide for the window wraps inside its cells. A code block is a shaded box in a
+  monospaced font, with long lines wrapped and the language, when the file names one,
+  as a small label. Diagrams drawn in text are code blocks and keep their shape.
 
 ## Core flows
 
 **Open and read.** The owner opens a Markdown file, from the file manager, from a
 terminal or from inside Leaf. The window shows the stats across the top, the outline
-on the left and the text from its first line. Reloading after the file changes on
+on the left and the document in the reading view from its start. Reloading after the file changes on
 disk, or recovering after a crash, also starts from the first line. They read by
-scrolling, and the outline follows, marking the section they are in.
+scrolling, and the outline follows, marking the section they are in. Find works in
+the reading view; links there can be clicked.
 
 **Jump to a section.** Without touching the mouse, the owner presses Ctrl+J to move
 into the outline, steps through the headings with the arrow keys, and presses Enter.
@@ -72,8 +83,10 @@ The text jumps so that heading is at the top, and the outline keeps focus so the
 jump again. Ctrl+J, or Escape, takes them back to the text. Clicking an entry jumps
 and puts them in the text.
 
-**Make a small edit.** The text is always editable. The owner clicks into it and types,
-as in Omawrite, and saves. The stats and the outline update as they type. Everything
+**Make a small edit.** The owner presses Ctrl+E, and the reading view gives way to
+the editing view at the same place. They type, as in Omawrite, and save; Ctrl+E takes
+them back to the reading view, which shows the edit. The stats and the outline update as they type. Replace is only in the editing view,
+since it changes the text. Everything
 Omawrite does to protect work still applies: recovery after a crash, a warning before
 a change on disk replaces local edits, a prompt before closing unsaved work.
 
@@ -108,6 +121,12 @@ All agreed with the owner.
   safety, fonts, scrolling feel and packaging are already solved and tested there.
 - Drawing tables and code blocks properly while keeping the text always editable is
   the hardest part of this, and the choice of approach turns on it.
+- Added 2026-09-27, after the first two cycles: styled raw text still reads as raw
+  Markdown -- `#` marks, `---` lines, dashes and lines broken mid-sentence -- and the
+  owner finds it unpleasant to read. Polishing it cannot join wrapped lines or draw
+  real grids without changing the text, so reading needs its own rendered view.
+- A rendered view built fresh from the text, shown and thrown away, never saved,
+  keeps the file safe in the same way printing does.
 
 ## Approaches considered
 
@@ -132,19 +151,34 @@ has real tables, and write it back out as Markdown on save. Not chosen: saving w
 rewrite the file's Markdown in the toolkit's style rather than as it was written,
 which breaks the constraint that Leaf never reformats a file.
 
+**D. Add a rendered reading view beside the editor.** Added 2026-09-27. Keep
+approach A's editor as the editing view, and open every file in a reading view built
+from the text by the toolkit's own Markdown support -- the one printing already uses
+-- then restyled to Leaf's look. Nothing built for it is ever saved. Medium effort,
+low to medium risk. Reuses the editor, the outline, the stats, theme following and
+find. Its limits are the toolkit's: code boxes are shaded bands rather than rounded
+boxes, and wide tables wrap rather than scroll. **Chosen, on top of A.** Rejected
+beside it: Leaf drawing every block itself, which gives full control at a much higher
+cost and stays open for any part that falls short, and a web page inside Leaf, for
+approach B's reasons.
+
 ## Chosen approach
 
-Approach A. The problems that cost the most every day -- opening at the bottom, no
+Approach A, then D. The problems that cost the most every day -- opening at the bottom, no
 way to jump between sections, stats hidden in a corner -- are all quick to fix on the
 existing editor. Editing is rare, so Obsidian-grade editing of tables matters less
 than it would to a writer. Formatting can improve in steps without giving up the
 tested work inherited from Omawrite, and approach B stays open if the drawn tables
 are not good enough.
 
+Once A's first two cycles were done, the styled raw text was still unpleasant to read,
+and reading is what the owner does most. Approach D gives reading a finished page
+without touching the file, and leaves editing as it was.
+
 ## Not in scope
 
-- A read-only mode or a separate edit mode. The text is always editable, as in
-  Omawrite.
+- Editing in the reading view. Edits are made in the editing view.
+- Remembering a view per file. Every file opens in the reading view.
 - A folder or file browser, tabs, or several documents in one window. One document
   per window.
 - An exact token count for any particular model.
@@ -161,16 +195,16 @@ are not good enough.
   outline, without scrolling or using find.
 - Words, lines, estimated tokens and sections are readable at the top of the window
   at a glance, and stay correct after an edit.
-- In the first step, table columns line up and code blocks are shaded apart from the
-  prose. When the later formatting cycle is done, tables read as grids and code
-  blocks as boxes.
+- In the reading view, headings, lists and paragraphs read as a finished page, with
+  no Markdown marks showing and no lines broken mid-sentence; tables read as grids
+  and code blocks as boxes.
 - Opening a Markdown file from the file manager or a terminal opens it in Leaf, and
   Omawrite can be uninstalled without losing any feature Leaf inherited from it.
 - A file opened, read and closed without edits is byte-for-byte unchanged on disk.
 
 ## Open questions
 
-- **How are true table grids and code boxes drawn over the text?** Resolved in the
-  later formatting cycle, on real LLM files.
+- **How are true table grids and code boxes drawn?** Resolved: in the reading view
+  (approach D), not over the editable text.
 - **What else in LLM files needs formatting** -- nested lists, block quotes, images,
   diagrams? Not discussed; resolved by reading real files in Leaf.
