@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    title: (backend.modified ? "* " : "") + backend.fileName + " - Leaf"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -254,6 +254,13 @@ ApplicationWindow {
             win.close();
         }
 
+        // A freshly loaded document is read from its first line. Without this the
+        // caret is left at the end of the new text and the view follows it there.
+        function onDocumentLoaded() {
+            editor.cursorPosition = 0;
+            editorFlick.scrollTo(0);
+        }
+
         function onSaveSucceeded() {
             win.awaitingPendingSave = false;
             if (win.pendingAction !== "")
@@ -341,6 +348,7 @@ ApplicationWindow {
 
         Flickable {
             id: editorFlick
+            objectName: "editorFlick"
             anchors.fill: parent
             anchors.leftMargin: 24
             anchors.rightMargin: 24

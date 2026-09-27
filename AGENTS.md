@@ -49,15 +49,12 @@ do not act past it.
   No reformatting, padding or normalising to make something display better; that is
   done with styling. See docs/architecture.md, "Why formatting only changes how text
   is drawn".
-- The code still says `omawrite` everywhere: program, package, settings, window
-  title. That is the fork's starting point, not a convention. Do not name new things
-  `omawrite`; the rename is its own piece of work.
 - A new source file that is missing from a build list fails late and confusingly.
-  C++ files go in `omawrite.pro`, and in `tests/tests.pro` if the tests use them;
+  C++ files go in `leaf.pro`, and in `tests/tests.pro` if the tests use them;
   QML and JS files go in `src/resources.qrc`, or the window fails to load at startup.
 - `bin/test` prints QML "Binding loop detected for property implicitWidth" warnings
   from the Material dialog. They were there at the fork and are not caused by your
   change; the pass/fail totals at the end are what count.
 - Do not run `bin/install` from a session: it runs `makepkg -fsi`, which asks for
-  sudo and installs a system package. Use `bin/build` and `build/omawrite <file>`
+  sudo and installs a system package. Use `bin/build` and `build/leaf <file>`
   to try the app.

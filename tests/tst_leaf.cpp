@@ -1,19 +1,26 @@
 #include <QtTest>
 #include <QFont>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QStandardPaths>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
 
-class OmawriteTest : public QObject {
+class LeafTest : public QObject {
     Q_OBJECT
 
 private slots:
     void initTestCase() {
         QVERIFY(m_settingsDirectory.isValid());
+        // Recovery snapshots go to a folder deleted after the run, so a failed test
+        // cannot leave one behind for the next run's windows to recover.
+        QVERIFY(m_dataDirectory.isValid());
+        qputenv("XDG_DATA_HOME", m_dataDirectory.path().toLocal8Bit());
         QQuickStyle::setStyle(QStringLiteral("Material"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
@@ -246,9 +253,133 @@ private slots:
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
     }
 
+    void opensLongDocumentAtFirstLine() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("long.md")),
+                                       longDocument(QStringLiteral("Opened")));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+
+        backend.open(QUrl::fromLocalFile(path));
+
+        assertAtFirstLine(window.data());
+    }
+
+    void opensIntoScrolledWindowAtFirstLine() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = writeFile(directory.filePath(QStringLiteral("first.md")),
+                                        longDocument(QStringLiteral("First")));
+        const QString second = writeFile(directory.filePath(QStringLiteral("second.md")),
+                                         longDocument(QStringLiteral("Second")));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(first));
+        scrollToEnd(window.data());
+
+        backend.open(QUrl::fromLocalFile(second));
+
+        assertAtFirstLine(window.data());
+    }
+
+    void reloadsChangedDocumentAtFirstLine() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("changing.md")),
+                                       longDocument(QStringLiteral("Before")));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        scrollToEnd(window.data());
+        writeFile(path, longDocument(QStringLiteral("After")));
+
+        backend.reloadFromDisk();
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor->property("text").toString().startsWith(QStringLiteral("After")));
+        assertAtFirstLine(window.data());
+    }
+
+    void recoversLongDocumentAtFirstLine() {
+        const QDir stateDirectory(
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+        QVERIFY(QDir().mkpath(stateDirectory.path()));
+        for (const QString &stale : stateDirectory.entryList({QStringLiteral("recovery-*")}))
+            QVERIFY(QFile::remove(stateDirectory.filePath(stale)));
+        const QString text = longDocument(QStringLiteral("Recovered"));
+        const QJsonObject snapshot{{QStringLiteral("fileUrl"), QString()},
+                                   {QStringLiteral("text"), text}};
+        writeFile(stateDirectory.filePath(QStringLiteral("recovery-0.json")),
+                  QString::fromUtf8(QJsonDocument(snapshot).toJson()));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QCOMPARE(editor->property("text").toString(), text);
+        assertAtFirstLine(window.data());
+        backend.discardRecovery();
+    }
+
 private:
+    static QString longDocument(const QString &title) {
+        QString text = title + QStringLiteral("\n\n");
+        for (int line = 1; line <= 400; ++line)
+            text += QStringLiteral("Line %1 of a long document.\n").arg(line);
+        return text;
+    }
+
+    static QString writeFile(const QString &path, const QString &text) {
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            file.write(text.toUtf8());
+        return path;
+    }
+
+    static QObject *createWindow(Backend &backend, QQmlEngine &engine) {
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        return component.create();
+    }
+
+    // Leave the view and the cursor at the end of the document, as a reader who
+    // had scrolled to the bottom would.
+    static void scrollToEnd(QObject *window) {
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        editor->setProperty("cursorPosition", editor->property("length"));
+        QTRY_VERIFY(flick->property("contentY").toReal() > 0);
+    }
+
+    static void assertAtFirstLine(QObject *window) {
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        QVERIFY(editor);
+        QVERIFY(flick);
+        // Let layout and any scroll that follows the cursor settle first, so a
+        // late jump to the bottom is caught rather than raced.
+        QTRY_VERIFY(flick->property("contentHeight").toReal()
+                    > 2 * flick->property("height").toReal());
+        QTest::qWait(100);
+        QCOMPARE(editor->property("cursorPosition").toInt(), 0);
+        QCOMPARE(flick->property("contentY").toReal(), 0.0);
+    }
+
     QTemporaryDir m_settingsDirectory;
+    QTemporaryDir m_dataDirectory;
 };
 
-QTEST_MAIN(OmawriteTest)
-#include "tst_omawrite.moc"
+QTEST_MAIN(LeafTest)
+#include "tst_leaf.moc"

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Leaf
+GenericName=Markdown Viewer
+Comment=Read and navigate Markdown files
+Exec=leaf %f
+Icon=leaf
+Terminal=false
+Categories=Office;Viewer;TextEditor;
+MimeType=text/markdown;text/x-markdown;text/plain;
+Keywords=markdown;viewer;reader;notes;text;
+StartupWMClass=leaf

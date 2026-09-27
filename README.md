@@ -6,15 +6,13 @@ files at the top, shows an outline of the headings to jump through, and shows wo
 line, token and section counts at a glance. Forked from Omawrite, it follows the
 system's dark or light mode, the live Omarchy theme and the desktop text size.
 
-Until the rename is done, the program, package and build output are still called
-`omawrite`.
-
 ## Running it
 
-- `bin/build` builds the app into `build/omawrite`. Run it with a file:
-  `build/omawrite notes.md`.
+- `bin/build` builds the app into `build/leaf`. Run it with a file:
+  `build/leaf notes.md`.
 - `bin/test` runs the test suite, headless.
-- `bin/install` builds and installs it as an Arch package (asks for sudo).
+- `bin/install` builds and installs it as an Arch package (asks for sudo), and
+  makes Leaf your default app for Markdown files.
 
 Needs Qt 6 (`qt6-base`, `qt6-declarative`), `xdg-desktop-portal` with a backend,
 and qmake and make to build.
