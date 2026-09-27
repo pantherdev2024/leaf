@@ -10,15 +10,13 @@ mode: run
 
 ## Where we are
 
-Opened. No spec yet. The brainstorm found this cycle contradicts the foundation:
-`docs/design.md` rules out a reading mode and chose approach A, and
-`docs/architecture.md` says "No rendered view and no separate reading mode". Those
-change first, agreed with the owner, then the spec.
+Spec approved 2026-09-27. The design and architecture were changed first, with the
+owner's agreement (commit "Open the reading-view cycle and change the foundation for
+it"). No plan yet.
 
 ## Next
 
-Agree the design and architecture changes with the owner, then write the spec
-(`start-work`, write-spec step) from the brainstorm findings.
+Write the plan: `plan-work` on `reading-view`.
 
 ## Done
 
@@ -43,3 +41,9 @@ Agree the design and architecture changes with the owner, then write the spec
   and swallow the lists and tables after them, and the default look is cramped with
   unshaded code. So a display-only cleaned copy is fed to the importer; the owner
   agreed that does not break the invariant, since it is never saved.
+- For the planner: the cold spec review noted that a QML TextEdit owns its own
+  document, so the renderer's document is attached with
+  `QQuickTextDocument::setTextDocument` (Qt 6.7+) or built into the TextEdit's own;
+  find in the reading view needs its own highlighting, since today's goes through the
+  editor's highlighter; printing today calls `setMarkdown` on the raw text and must
+  go through the renderer instead.
