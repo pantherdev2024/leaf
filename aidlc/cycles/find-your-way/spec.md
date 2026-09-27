@@ -103,7 +103,9 @@ drawn from the text; the file on disk changes only when the owner saves an edit.
   moves focus into the outline
   with the marked entry selected, or the first entry when nothing is marked.
   - Up and down arrows move the selection. The text does not move while they do.
-  - Enter jumps to the selected heading and returns focus to the text.
+  - Enter jumps to the selected heading and leaves focus in the outline, so the
+    owner can keep stepping and jumping. The text cursor is placed at the heading,
+    ready for when they return to the text (scope change, 2026-09-27).
   - Escape, or Ctrl+J again, returns focus to the text without jumping. The text
     cursor is where it was.
   - In a file with no headings, or while a dialog is open, Ctrl+J does nothing.

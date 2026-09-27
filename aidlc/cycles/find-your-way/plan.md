@@ -49,9 +49,9 @@ and closed without edits is byte-for-byte unchanged. Effort: medium.
 Leaves behind: the outline as the core exposes it (entries with level, display text
 and position), and the pane's jump, which later cycles do not change.
 
-- [ ] 2-1 outline-pane -- expose the outline from the core, show it in a fixed-width pane on the left with indents, "…", "Untitled heading" and "No headings", fit the text column beside it, and jump on click with the heading at the top and the cursor at its start. Done when: tests check the outline's entries and a jump's landing; clicking entries in a long file on screen lands each heading at the top. Depends on: 1-2. Effort: high.
-- [ ] 2-2 reading-mark -- mark the heading being read as the view scrolls, mark a picked heading after a jump even when it cannot reach the top, and keep the mark in view in a long outline. Done when: tests check the mark after scrolling and after a jump near the end; on screen, the mark follows scrolling in a long file. Depends on: 2-1.
-- [ ] 2-3 outline-keyboard -- Ctrl+J into and out of the outline from the text or the find bar, arrows to move without moving the text, Enter to jump, Escape to return, nothing with no headings or with a dialog open, and Ctrl+J in the shortcuts list. Done when: tests drive each key; on screen, a section of a long file is reached without the mouse. Depends on: 2-2.
+- [x] 2-1 outline-pane -- expose the outline from the core, show it in a fixed-width pane on the left with indents, "…", "Untitled heading" and "No headings", fit the text column beside it, and jump on click with the heading at the top and the cursor at its start. Done when: tests check the outline's entries and a jump's landing; clicking entries in a long file on screen lands each heading at the top. Depends on: 1-2. Effort: high.
+- [x] 2-2 reading-mark -- mark the heading being read as the view scrolls, mark a picked heading after a jump even when it cannot reach the top, and keep the mark in view in a long outline. Done when: tests check the mark after scrolling and after a jump near the end; on screen, the mark follows scrolling in a long file. Depends on: 2-1.
+- [x] 2-3 outline-keyboard -- Ctrl+J into and out of the outline from the text or the find bar, arrows to move without moving the text, Enter to jump, Escape to return, nothing with no headings or with a dialog open, and Ctrl+J in the shortcuts list. Done when: tests drive each key; on screen, a section of a long file is reached without the mouse. Depends on: 2-2.
 
 ## Notes
 

@@ -723,8 +723,48 @@ int Backend::estimateTokens(const QString &text) {
     return (text.length() + 2) / 4;
 }
 
+QString Backend::outlineTitle(const QString &headingText) {
+    // A closing run of #s counts only after a space, so "C#" keeps its #.
+    static const QRegularExpression closingRe(QStringLiteral("(?:^|\\s)#+\\s*$"));
+    QString title = headingText;
+    title.remove(closingRe);
+
+    // Drop the markers by the rules the styling hides them with. Markers can
+    // overlap -- an underscore pair inside a link's address is also italic -- so
+    // mark every character to drop first, then keep the rest. Markers inside
+    // inline code are text.
+    QVector<bool> drop(title.size(), false);
+    const auto dropSpan = [&drop](int start, int length) {
+        for (int i = start; i < start + length; ++i)
+            drop[i] = true;
+    };
+    const QList<MarkdownHighlighter::Span> code = MarkdownHighlighter::inlineCodeSpans(title);
+    const auto insideCode = [&code](const MarkdownHighlighter::Span &marker) {
+        return std::any_of(code.begin(), code.end(), [&marker](const auto &span) {
+            return marker.start >= span.start && marker.start < span.start + span.length;
+        });
+    };
+    for (const MarkdownHighlighter::InlineMarkup &item : MarkdownHighlighter::inlineMarkup(title)) {
+        for (const MarkdownHighlighter::Span &marker : item.markers) {
+            if (!insideCode(marker))
+                dropSpan(marker.start, marker.length);
+        }
+    }
+    for (const MarkdownHighlighter::Span &span : code) {
+        dropSpan(span.start, 1);
+        dropSpan(span.start + span.length - 1, 1);
+    }
+
+    QString kept;
+    for (int i = 0; i < title.size(); ++i) {
+        if (!drop.at(i))
+            kept += title.at(i);
+    }
+    return kept.trimmed();
+}
+
 // Everything derived from the text is worked out here, from one scan, so the
-// figures cannot disagree with each other.
+// figures and the outline cannot disagree with each other.
 void Backend::recount(const QString &text) {
     const StructureScan::Structure structure = StructureScan::scan(text);
     const int words = countWords(text);
@@ -739,6 +779,17 @@ void Backend::recount(const QString &text) {
         m_tokenEstimate = tokens;
         m_sectionCount = sections;
         emit statsChanged();
+    }
+
+    QVariantList outline;
+    for (const StructureScan::Heading &heading : structure.headings) {
+        outline.append(QVariantMap{{QStringLiteral("level"), heading.level},
+                                   {QStringLiteral("title"), outlineTitle(heading.text)},
+                                   {QStringLiteral("position"), heading.position}});
+    }
+    if (outline != m_outline) {
+        m_outline = outline;
+        emit outlineChanged();
     }
 }
 

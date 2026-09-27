@@ -228,14 +228,8 @@ void MarkdownHighlighter::highlightMarkers(const QString &text, bool heading) {
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {
-    if (text.contains(QLatin1Char('`'))) {
-        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
-        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
-        while (codeMatches.hasNext()) {
-            const QRegularExpressionMatch match = codeMatches.next();
-            setFormat(match.capturedStart(0), match.capturedLength(0), m_codeFormat);
-        }
-    }
+    for (const Span &code : inlineCodeSpans(text))
+        setFormat(code.start, code.length, m_codeFormat);
 
     const QList<InlineMarkup> markup = inlineMarkup(text);
     for (const InlineMarkup &item : markup) {
@@ -247,6 +241,20 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         for (const Span &marker : item.markers)
             setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
     }
+}
+
+QList<MarkdownHighlighter::Span> MarkdownHighlighter::inlineCodeSpans(const QString &text) {
+    QList<Span> spans;
+    if (!text.contains(QLatin1Char('`')))
+        return spans;
+
+    static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+    QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
+    while (codeMatches.hasNext()) {
+        const QRegularExpressionMatch match = codeMatches.next();
+        spans.append({int(match.capturedStart(0)), int(match.capturedLength(0))});
+    }
+    return spans;
 }
 
 QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const QString &text) {

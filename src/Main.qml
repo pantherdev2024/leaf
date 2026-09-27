@@ -25,10 +25,14 @@ ApplicationWindow {
     // `omarchy display text size` drives) anchored so its 12px default leaves
     // the app at the sizes it was designed around.
     readonly property real textScale: backend.textScale
-    readonly property int editorFontPixelSize: scaledSize(20)
+    readonly property int editorFontPixelSize: scaledSize(17)
+    readonly property int outlineWidth: scaledSize(260)
+    // The reading width, fitted to the space beside the outline pane, and never
+    // wider than that space in a narrow window.
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
-        Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
+        Math.max(360, width - outlineWidth - Math.round(writerFontMetrics.averageCharacterWidth * 20)),
+        editorFlick.width)
     property bool closeConfirmed: false
     property bool searchOpen: false
     property bool searchUpdating: false
@@ -38,6 +42,11 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    // The outline entry being read, or -1 above the first heading. After a jump
+    // it is held on the picked entry, which may not have reached the top, until
+    // the view next moves; an edit alone does not move it.
+    property int markedHeading: -1
+    property bool markHeld: false
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -88,6 +97,56 @@ ApplicationWindow {
     // Every hardcoded size in the interface is expressed at text scale 1.
     function scaledSize(pixels) {
         return Math.max(1, Math.round(pixels * win.textScale));
+    }
+
+    // Bring a heading's line to the top of the view, or as near as the end of the
+    // text allows, with the cursor at its start. The cursor moves first, so the
+    // scroll that follows the cursor does not pull the view off the heading. The
+    // entry is marked and held after the scroll, which would otherwise mark by
+    // the usual rule. Focus stays where it is: a click moves it to the text, Enter
+    // in the outline leaves it there.
+    function jumpToHeading(index) {
+        var target = Math.min(backend.outline[index].position, editor.length);
+        editor.cursorPosition = target;
+        var line = editor.positionToRectangle(target);
+        editorFlick.scrollTo(editorFlick.clampContentY(editor.y + line.y));
+        markedHeading = index;
+        markHeld = true;
+    }
+
+    // The last heading whose line starts at or above the top of the view. Scrolled
+    // to the very top, the text starts below the view's edge, so the first line
+    // counts as at the top then. A pixel of slack covers the view's snapping.
+    // Headings only move down the text, so a binary search over their lines will do.
+    function headingAtTop() {
+        var outline = backend.outline;
+        var readingLine = Math.max(editorFlick.contentY, editor.y) + 1;
+        var found = -1;
+        var low = 0;
+        var high = outline.length - 1;
+        while (low <= high) {
+            var middle = Math.floor((low + high) / 2);
+            var position = Math.min(outline[middle].position, editor.length);
+            if (editor.y + editor.positionToRectangle(position).y <= readingLine) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return found;
+    }
+
+    function updateMark() {
+        if (!markHeld)
+            markedHeading = headingAtTop();
+    }
+
+    onMarkedHeadingChanged: showMarkInOutline()
+
+    function showMarkInOutline() {
+        if (markedHeading >= 0)
+            outlineList.positionViewAtIndex(markedHeading, ListView.Contain);
     }
 
     function toggleFullScreen() {
@@ -225,6 +284,23 @@ ApplicationWindow {
         onActivated: editor.redo()
     }
 
+    // Into the outline with the marked entry selected, and back to the text. An
+    // open dialog already keeps the key from reaching the outline.
+    Shortcut {
+        sequence: "Ctrl+J"
+        context: Qt.WindowShortcut
+        enabled: backend.outline.length > 0
+        onActivated: {
+            if (outlineList.activeFocus) {
+                editor.forceActiveFocus();
+                return;
+            }
+            outlineList.currentIndex = Math.max(0, win.markedHeading);
+            outlineList.positionViewAtIndex(outlineList.currentIndex, ListView.Contain);
+            outlineList.forceActiveFocus();
+        }
+    }
+
     Shortcut {
         sequence: "Ctrl+F"
         context: Qt.ApplicationShortcut
@@ -264,6 +340,12 @@ ApplicationWindow {
         function onDocumentLoaded() {
             editor.cursorPosition = 0;
             editorFlick.scrollTo(0);
+        }
+
+        // A new outline resets the pane's list to its top, so show the mark again.
+        function onOutlineChanged() {
+            win.updateMark();
+            Qt.callLater(win.showMarkInOutline);
         }
 
         function onSaveSucceeded() {
@@ -338,12 +420,13 @@ ApplicationWindow {
 
     Dialog {
         id: shortcutsDialog
+        objectName: "shortcutsDialog"
         modal: true
         title: "Keyboard shortcuts"
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+J  Outline\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -369,6 +452,11 @@ ApplicationWindow {
                 Label {
                     objectName: card.name + "Value"
                     anchors.horizontalCenter: parent.horizontalCenter
+                    // A large figure in a narrow window shrinks to fit its card.
+                    width: card.width - win.scaledSize(12)
+                    horizontalAlignment: Text.AlignHCenter
+                    fontSizeMode: Text.HorizontalFit
+                    minimumPixelSize: win.scaledSize(11)
                     text: card.value
                     color: win.textColor
                     font.family: "iA Writer Mono S"
@@ -390,7 +478,8 @@ ApplicationWindow {
             id: statCards
             anchors.top: parent.top
             anchors.topMargin: win.scaledSize(20)
-            anchors.horizontalCenter: parent.horizontalCenter
+            // Over the text column, which is centred in the space beside the outline.
+            anchors.horizontalCenter: editorFlick.horizontalCenter
             spacing: win.scaledSize(12)
 
             readonly property int cardWidth: Math.floor((win.editorWidth - 3 * spacing) / 4)
@@ -401,11 +490,102 @@ ApplicationWindow {
             StatCard { name: "sections"; label: "Sections"; value: win.formatCount(backend.sectionCount) }
         }
 
+        Item {
+            id: outlinePane
+            anchors.top: statCards.bottom
+            anchors.topMargin: win.scaledSize(28)
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            // Clear of the footer's buttons below.
+            anchors.bottomMargin: win.scaledSize(40)
+            width: win.outlineWidth
+
+            ListView {
+                id: outlineList
+                objectName: "outlineList"
+                anchors.fill: parent
+                anchors.leftMargin: win.scaledSize(16)
+                anchors.rightMargin: win.scaledSize(8)
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: backend.outline
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                // The arrows move the selection by the list's own key navigation,
+                // which leaves the text where it is.
+                Keys.onReturnPressed: win.jumpToHeading(currentIndex)
+                Keys.onEnterPressed: win.jumpToHeading(currentIndex)
+                Keys.onEscapePressed: editor.forceActiveFocus()
+                // Opening a file without headings from here leaves nothing to select.
+                onCountChanged: {
+                    if (count === 0 && activeFocus)
+                        editor.forceActiveFocus();
+                }
+
+                delegate: Rectangle {
+                    required property var modelData
+                    required property int index
+                    readonly property bool untitled: modelData.title === ""
+                    readonly property bool marked: index === win.markedHeading
+                    readonly property bool selected: ListView.isCurrentItem && ListView.view.activeFocus
+
+                    width: ListView.view.width
+                    height: win.scaledSize(30)
+                    radius: 6
+                    color: marked
+                        ? Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.10)
+                        : entryMouse.containsMouse
+                            ? Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.05)
+                            : "transparent"
+                    // The keyboard selection is a ring, apart from the mark's tint.
+                    border.width: selected ? 1 : 0
+                    border.color: backend.themeAccent
+
+                    Label {
+                        anchors.fill: parent
+                        anchors.leftMargin: win.scaledSize(10) + (modelData.level - 1) * win.scaledSize(14)
+                        anchors.rightMargin: win.scaledSize(10)
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        text: untitled ? "Untitled heading" : modelData.title
+                        color: marked ? backend.themeAccent
+                            : untitled ? win.mutedColor : win.textColor
+                        font.family: "iA Writer Mono S"
+                        font.pixelSize: win.scaledSize(13)
+                        font.weight: modelData.level === 1 ? Font.DemiBold : Font.Normal
+                    }
+
+                    MouseArea {
+                        id: entryMouse
+                        objectName: "outlineEntry"
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            win.jumpToHeading(index);
+                            editor.forceActiveFocus();
+                        }
+                    }
+                }
+            }
+
+            Label {
+                objectName: "noHeadings"
+                visible: outlineList.count === 0
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.leftMargin: win.scaledSize(26)
+                text: "No headings"
+                color: win.mutedColor
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.scaledSize(13)
+            }
+        }
+
         Flickable {
             id: editorFlick
             objectName: "editorFlick"
             anchors.top: statCards.bottom
-            anchors.left: parent.left
+            anchors.left: outlinePane.right
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.leftMargin: 24
@@ -539,6 +719,11 @@ ApplicationWindow {
 
             onMovementStarted: wheelScroll.stop()
 
+            onContentYChanged: {
+                win.markHeld = false;
+                win.updateMark();
+            }
+
             function scrollByWheel(wheel) {
                 // High-resolution wheels report fractional notches; feed
                 // those through the same animated path, like Chromium does
@@ -624,6 +809,8 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                // The text has rewrapped by now, so headings are where they will be drawn.
+                onWidthChanged: win.updateMark()
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);

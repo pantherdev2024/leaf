@@ -25,6 +25,9 @@ class Backend : public QObject {
     Q_PROPERTY(int lineCount READ lineCount NOTIFY statsChanged)
     Q_PROPERTY(int tokenEstimate READ tokenEstimate NOTIFY statsChanged)
     Q_PROPERTY(int sectionCount READ sectionCount NOTIFY statsChanged)
+    // Each entry: level, title (as the outline shows it) and position (of the
+    // heading line's first character).
+    Q_PROPERTY(QVariantList outline READ outline NOTIFY outlineChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
     Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
@@ -47,6 +50,7 @@ public:
     int lineCount() const { return m_lineCount; }
     int tokenEstimate() const { return m_tokenEstimate; }
     int sectionCount() const { return m_sectionCount; }
+    QVariantList outline() const { return m_outline; }
     bool darkMode() const { return m_darkMode; }
     void setDarkMode(bool darkMode);
     qreal textScale() const { return m_textScale; }
@@ -58,6 +62,7 @@ public:
     static int countWords(const QString &text);
     static int countLines(const QString &text);
     static int estimateTokens(const QString &text);
+    static QString outlineTitle(const QString &headingText);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
 
@@ -88,6 +93,7 @@ signals:
     void modifiedChanged();
     void statusChanged();
     void statsChanged();
+    void outlineChanged();
     void darkModeChanged();
     void textScaleChanged();
     void themeColorsChanged();
@@ -126,6 +132,7 @@ private:
     int m_lineCount = 0;
     int m_tokenEstimate = 0;
     int m_sectionCount = 0;
+    QVariantList m_outline;
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
     bool m_loading = false;

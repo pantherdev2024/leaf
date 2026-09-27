@@ -5,7 +5,9 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QQuickStyle>
+#include <QQuickWindow>
 #include <QQuickTextDocument>
 #include <QStandardPaths>
 #include <QTextBlock>
@@ -132,6 +134,515 @@ private slots:
 
         QCOMPARE(cardText(window.data(), "words"), QStringLiteral("1,234"));
         QCOMPARE(cardText(window.data(), "tokens"), QStringLiteral("≈ 1,543"));
+    }
+
+    void titlesOutlineEntriesAsTheyRead() {
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("Plan")), QStringLiteral("Plan"));
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("Closing ##")), QStringLiteral("Closing"));
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("C#")), QStringLiteral("C#"));
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("The **big** and *small* idea")),
+                 QStringLiteral("The big and small idea"));
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("Use `code` and [a link](https://x.org)")),
+                 QStringLiteral("Use code and a link"));
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("Keep `**stars**` in code")),
+                 QStringLiteral("Keep **stars** in code"));
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("[docs](https://x.org/my_page_name) guide")),
+                 QStringLiteral("docs guide"));
+        QCOMPARE(Backend::outlineTitle(QString()), QString());
+        QCOMPARE(Backend::outlineTitle(QStringLiteral("##")), QString());
+    }
+
+    void exposesTheOutlineOnLoadAndAfterAnEdit() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("stats.md")),
+                                       statsDocument());
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        QCOMPARE(backend.outline().size(), 2);
+        assertEntry(backend.outline().at(0), 1, QStringLiteral("One"), 20);
+        assertEntry(backend.outline().at(1), 2, QStringLiteral("Two"), 40);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QTextDocument *document =
+            editor->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTextCursor cursor(document);
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QStringLiteral("### The **third**\n"));
+
+        QTRY_COMPARE(backend.outline().size(), 3);
+        assertEntry(backend.outline().at(2), 3, QStringLiteral("The third"), 47);
+    }
+
+    void listsHeadingsInThePaneOrSaysThereAreNone() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString headed = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                         statsDocument());
+        const QString plain = writeFile(directory.filePath(QStringLiteral("plain.md")),
+                                        QStringLiteral("Just prose.\n```\n# code\n```\n"));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+        QObject *noHeadings = window->findChild<QObject *>(QStringLiteral("noHeadings"));
+        QVERIFY(list);
+        QVERIFY(noHeadings);
+
+        backend.open(QUrl::fromLocalFile(headed));
+        QCOMPARE(list->property("count").toInt(), 2);
+        QVERIFY(!noHeadings->property("visible").toBool());
+
+        backend.open(QUrl::fromLocalFile(plain));
+        QCOMPARE(list->property("count").toInt(), 0);
+        QVERIFY(noHeadings->property("visible").toBool());
+    }
+
+    void jumpsToAHeadingWithItsLineAtTheTop() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+
+        const int position = text.indexOf(QStringLiteral("## Section 4"));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "jumpToHeading", Q_ARG(QVariant, 4)));
+        QTest::qWait(100);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        QCOMPARE(editor->property("cursorPosition").toInt(), position);
+        QVERIFY(editor->property("activeFocus").toBool());
+        // The view snaps to whole pixels, so the line lands within one of its top.
+        QVERIFY(qAbs(flick->property("contentY").toReal() - lineTop(editor, position)) <= 1);
+    }
+
+    void jumpsToAHeadingClickedInTheOutline() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+
+        // The entries in order: "Headed", then "Section 1" onwards.
+        QQuickItem *entry = nullptr;
+        QTRY_VERIFY((entry = outlineEntry(window.data(), QStringLiteral("Section 3"))));
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+        const QPointF centre = entry->mapToScene(QPointF(entry->width() / 2, entry->height() / 2));
+        QTest::mouseClick(quickWindow, Qt::LeftButton, {}, centre.toPoint());
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QTRY_COMPARE(editor->property("cursorPosition").toInt(),
+                     text.indexOf(QStringLiteral("## Section 3")));
+        QVERIFY(editor->property("activeFocus").toBool());
+    }
+
+    void jumpsToAHeadingNearTheEndAsFarAsTheTextScrolls() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument() + QStringLiteral("## Last\nThe end.\n");
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+
+        const int position = text.indexOf(QStringLiteral("## Last"));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "jumpToHeading", Q_ARG(QVariant, 9)));
+        QTest::qWait(100);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        const qreal furthest = flick->property("contentHeight").toReal()
+            - flick->property("height").toReal();
+        QCOMPARE(editor->property("cursorPosition").toInt(), position);
+        QVERIFY(qAbs(flick->property("contentY").toReal() - furthest) <= 1);
+        QVERIFY(furthest < lineTop(editor, position));
+
+        // The picked heading is marked though it could not reach the top, until the
+        // view scrolls again.
+        QCOMPARE(window->property("markedHeading").toInt(), 9);
+        flick->setProperty("contentY", furthest - 10);
+        QCOMPARE(window->property("markedHeading").toInt(), 8);
+    }
+
+    void marksTheHeadingBeingRead() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+        QCOMPARE(window->property("markedHeading").toInt(), 0);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        const qreal sectionThree = lineTop(editor, text.indexOf(QStringLiteral("## Section 3")));
+        flick->setProperty("contentY", sectionThree);
+        QCOMPARE(window->property("markedHeading").toInt(), 3);
+
+        flick->setProperty("contentY", sectionThree - 10);
+        QCOMPARE(window->property("markedHeading").toInt(), 2);
+    }
+
+    void remarksAfterTheTextRewraps() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QString text;
+        for (int section = 1; section <= 6; ++section) {
+            text += QStringLiteral("## Section %1\n").arg(section);
+            for (int paragraph = 1; paragraph <= 8; ++paragraph)
+                text += QStringLiteral("A paragraph long enough to wrap onto several lines "
+                                       "whenever the text column is made narrower than it "
+                                       "starts out, which moves every heading below it.\n\n");
+        }
+        const QString path = writeFile(directory.filePath(QStringLiteral("wrapped.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        flick->setProperty("contentY",
+                           lineTop(editor, text.indexOf(QStringLiteral("## Section 3"))));
+        QCOMPARE(window->property("markedHeading").toInt(), 2);
+
+        window->setProperty("width", 700);
+
+        QTRY_VERIFY(window->property("markedHeading").toInt() < 2);
+        QVariant atTop;
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "headingAtTop",
+                                          Q_RETURN_ARG(QVariant, atTop)));
+        QCOMPARE(window->property("markedHeading").toInt(), atTop.toInt());
+    }
+
+    void holdsAJumpsMarkThroughAnEdit() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument() + QStringLiteral("## Last\nThe end.\n");
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "jumpToHeading", Q_ARG(QVariant, 9)));
+        QCOMPARE(window->property("markedHeading").toInt(), 9);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QTextDocument *document =
+            editor->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTextCursor cursor(document->findBlock(text.indexOf(QStringLiteral("## Last"))));
+        cursor.movePosition(QTextCursor::EndOfBlock);
+        cursor.insertText(QStringLiteral(" words"));
+
+        QTRY_COMPARE(backend.outline().at(9).toMap().value(QStringLiteral("title")).toString(),
+                     QStringLiteral("Last words"));
+        QCOMPARE(window->property("markedHeading").toInt(), 9);
+    }
+
+    void entersTheOutlineAtTheMarkWithCtrlJ() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+        flick->setProperty("contentY",
+                           lineTop(editor, text.indexOf(QStringLiteral("## Section 3"))));
+        QCOMPARE(window->property("markedHeading").toInt(), 3);
+
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+
+        QVERIFY(list->property("activeFocus").toBool());
+        QCOMPARE(list->property("currentIndex").toInt(), 3);
+    }
+
+    void movesTheSelectionWithoutMovingTheText() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        press(window.data(), Qt::Key_Down);
+        press(window.data(), Qt::Key_Down);
+        press(window.data(), Qt::Key_Down);
+        press(window.data(), Qt::Key_Up);
+
+        QCOMPARE(list->property("currentIndex").toInt(), 2);
+        QCOMPARE(flick->property("contentY").toReal(), 0.0);
+        QCOMPARE(window->property("markedHeading").toInt(), 0);
+
+        press(window.data(), Qt::Key_Return);
+
+        // Enter jumps and stays in the outline, so the owner can keep stepping.
+        const int position = text.indexOf(QStringLiteral("## Section 2"));
+        QVERIFY(list->property("activeFocus").toBool());
+        QCOMPARE(editor->property("cursorPosition").toInt(), position);
+        QCOMPARE(window->property("markedHeading").toInt(), 2);
+        QVERIFY(qAbs(flick->property("contentY").toReal() - lineTop(editor, position)) <= 1);
+
+        press(window.data(), Qt::Key_Down);
+        press(window.data(), Qt::Key_Return);
+        const int next = text.indexOf(QStringLiteral("## Section 3"));
+        QCOMPARE(window->property("markedHeading").toInt(), 3);
+        QVERIFY(qAbs(flick->property("contentY").toReal() - lineTop(editor, next)) <= 1);
+
+        // Ctrl+J returns to the text at the last heading jumped to.
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        QVERIFY(editor->property("activeFocus").toBool());
+        QCOMPARE(editor->property("cursorPosition").toInt(), next);
+    }
+
+    void returnsToTheTextUnmovedWithEscapeOrCtrlJ() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+        editor->setProperty("cursorPosition", 5);
+
+        for (const Qt::Key key : {Qt::Key_Escape, Qt::Key_J}) {
+            press(window.data(), Qt::Key_J, Qt::ControlModifier);
+            QVERIFY(list->property("activeFocus").toBool());
+            press(window.data(), Qt::Key_Down);
+            press(window.data(), key, key == Qt::Key_J ? Qt::ControlModifier : Qt::NoModifier);
+
+            QVERIFY(editor->property("activeFocus").toBool());
+            QCOMPARE(editor->property("cursorPosition").toInt(), 5);
+            QCOMPARE(flick->property("contentY").toReal(), 0.0);
+        }
+    }
+
+    void selectsTheFirstEntryWhenNothingIsMarked() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("stats.md")),
+                                       statsDocument());
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(window->property("markedHeading").toInt(), -1);
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+
+        QVERIFY(list->property("activeFocus").toBool());
+        QCOMPARE(list->property("currentIndex").toInt(), 0);
+    }
+
+    void entersTheOutlineFromTheFindBar() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                       headedDocument());
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+
+        press(window.data(), Qt::Key_F, Qt::ControlModifier);
+        QVERIFY(window->property("searchOpen").toBool());
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+
+        QVERIFY(list->property("activeFocus").toBool());
+    }
+
+    void ignoresCtrlJWithoutHeadingsOrWithADialogOpen() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString plain = writeFile(directory.filePath(QStringLiteral("plain.md")),
+                                        QStringLiteral("Just prose.\n"));
+        const QString headed = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                         headedDocument());
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+
+        backend.open(QUrl::fromLocalFile(plain));
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        QVERIFY(!list->property("activeFocus").toBool());
+        QVERIFY(editor->property("activeFocus").toBool());
+
+        backend.open(QUrl::fromLocalFile(headed));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("shortcutsDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        QVERIFY(!list->property("activeFocus").toBool());
+
+        // The same key works once the dialog is closed, so the checks above are real.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        QTRY_VERIFY(list->property("activeFocus").toBool());
+    }
+
+    void leavesAnOutlineThatEmptiesForTheText() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString headed = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                         headedDocument());
+        const QString plain = writeFile(directory.filePath(QStringLiteral("plain.md")),
+                                        QStringLiteral("Just prose.\n"));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+        backend.open(QUrl::fromLocalFile(headed));
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        QVERIFY(list->property("activeFocus").toBool());
+
+        backend.open(QUrl::fromLocalFile(plain));
+
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+    }
+
+    void marksNothingAboveTheFirstHeading() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = writeFile(directory.filePath(QStringLiteral("stats.md")),
+                                       statsDocument());
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        QCOMPARE(window->property("markedHeading").toInt(), -1);
+    }
+
+    void keepsTheMarkInViewInALongOutline() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QString text;
+        for (int section = 1; section <= 80; ++section)
+            text += QStringLiteral("## Part %1\nA line.\nAnother line.\n\n").arg(section);
+        const QString path = writeFile(directory.filePath(QStringLiteral("parts.md")), text);
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        assertAtFirstLine(window.data());
+
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        flick->setProperty("contentY", flick->property("contentHeight").toReal()
+                                           - flick->property("height").toReal());
+        const int marked = window->property("markedHeading").toInt();
+        QVERIFY(marked > 70);
+
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+        QQuickItem *entry = nullptr;
+        QTRY_VERIFY(QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, entry),
+                                              Q_ARG(int, marked))
+                    && entry);
+        QVERIFY(entryInView(list, entry));
+
+        // A changed outline resets the list to its top; the mark is shown again.
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QTextDocument *document =
+            editor->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTextCursor cursor(document->findBlock(text.indexOf(QStringLiteral("## Part 80"))));
+        cursor.movePosition(QTextCursor::EndOfBlock);
+        cursor.insertText(QStringLiteral(" and last"));
+        QTRY_COMPARE(backend.outline().at(79).toMap().value(QStringLiteral("title")).toString(),
+                     QStringLiteral("Part 80 and last"));
+        QTRY_VERIFY(QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem *, entry),
+                                              Q_ARG(int, marked))
+                    && entry && entryInView(list, entry));
+    }
+
+    void keepsTheTextColumnBesideTheOutlineInANarrowWindow() {
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+
+        window->setProperty("width", 600);
+
+        QTRY_COMPARE(flick->property("width").toInt(), 600 - 260 - 48);
+        QVERIFY(editor->property("x").toReal() >= 0);
+        QVERIFY(editor->property("width").toReal() <= flick->property("width").toReal());
     }
 
     void normalizesLinks() {
@@ -469,16 +980,16 @@ private slots:
 
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QVERIFY(editor);
-        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 20);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 17);
 
         // `omarchy display text size 16` sets the GNOME factor to 16/12.
         backend.setTextScale(16.0 / 12.0);
-        QCOMPARE(window->property("editorFontPixelSize").toInt(), 27);
-        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 27);
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 23);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 23);
 
         backend.setTextScale(9.0 / 12.0);
-        QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
-        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 13);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 13);
     }
 
     void remembersLastSaveDirectory() {
@@ -609,6 +1120,75 @@ private:
     static QString statsDocument() {
         return QStringLiteral(
             "---\ntitle: Plan\n---\n# One\n```\n# not\n```\n## Two\n");
+    }
+
+    static void assertEntry(const QVariant &entry, int level, const QString &title,
+                            int position) {
+        const QVariantMap map = entry.toMap();
+        QCOMPARE(map.value(QStringLiteral("level")).toInt(), level);
+        QCOMPARE(map.value(QStringLiteral("title")).toString(), title);
+        QCOMPARE(map.value(QStringLiteral("position")).toInt(), position);
+    }
+
+    // Eight sections of fifty lines, each opened by "## Section N".
+    static QString headedDocument() {
+        QString text = QStringLiteral("# Headed\n\n");
+        for (int section = 1; section <= 8; ++section) {
+            text += QStringLiteral("## Section %1\n").arg(section);
+            for (int line = 1; line <= 50; ++line)
+                text += QStringLiteral("Line %1 of section %2.\n").arg(line).arg(section);
+        }
+        return text;
+    }
+
+    // The outline pane's clickable entry showing a title, once it is laid out. List
+    // delegates are not QObject children, so this walks the visual items.
+    static QQuickItem *outlineEntry(QObject *window, const QString &title) {
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window);
+        QList<QQuickItem *> items{quickWindow->contentItem()};
+        while (!items.isEmpty()) {
+            QQuickItem *item = items.takeFirst();
+            if (item->objectName() == QStringLiteral("outlineEntry")) {
+                const QVariantMap data = item->parentItem()->property("modelData").toMap();
+                if (data.value(QStringLiteral("title")).toString() == title)
+                    return item;
+            }
+            items.append(item->childItems());
+        }
+        return nullptr;
+    }
+
+    // A window that receives key presses: shortcuts need it active.
+    static QObject *createActiveWindow(Backend &backend, QQmlEngine &engine) {
+        QObject *window = createWindow(backend, engine);
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window);
+        if (!quickWindow)
+            return window;
+        quickWindow->requestActivate();
+        if (!QTest::qWaitForWindowActive(quickWindow)) {
+            delete window;
+            return nullptr;
+        }
+        return window;
+    }
+
+    static void press(QObject *window, Qt::Key key,
+                      Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QTest::keyClick(qobject_cast<QQuickWindow *>(window), key, modifiers);
+    }
+
+    static bool entryInView(QObject *list, QQuickItem *entry) {
+        const qreal listTop = list->property("contentY").toReal();
+        const qreal listBottom = listTop + list->property("height").toReal();
+        return entry->y() >= listTop && entry->y() + entry->height() <= listBottom;
+    }
+
+    // Where a position's line starts, in the scrolled view's coordinates.
+    static qreal lineTop(QObject *editor, int position) {
+        QRectF line;
+        QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, line),
+                                  Q_ARG(int, position));
+        return editor->property("y").toReal() + line.y();
     }
 
     static QString cardText(QObject *window, const char *name) {
