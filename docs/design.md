@@ -38,17 +38,22 @@ better tool, and it is not built or packaged for anyone else.
 - **Document** -- one Markdown file open in one window. The file on disk is plain
   text and stays exactly as written unless the owner edits it; Leaf never reformats
   it.
-- **Heading** -- a Markdown heading line, at levels one to six. A `#` line inside a
-  code block is not a heading.
+- **Heading** -- a Markdown heading line, one to six `#` characters and a space, at
+  levels one to six. A `#` line inside a code block or front matter is not a heading.
+  Headings made by underlining a line with `===` or `---` are not recognised.
 - **Section** -- a heading and everything under it, up to the next heading of the same
   or a higher level. Sections nest.
 - **Outline** -- the list of a document's headings in order, indented by level, shown
-  in a pane to the left of the text. It marks the section currently in view. Picking
-  an entry brings that heading to the top of the view.
+  in a pane to the left of the text. Every level is shown and nothing folds; a file
+  with no headings shows "No headings", and front matter is never part of it. It
+  marks the section currently in view. Picking an entry brings that heading to the
+  top of the view.
 - **Stats** -- four figures about the document, shown as cards above the text: words,
   lines, estimated tokens, and sections. Estimated tokens is a rough guide to how
   much of an LLM's context the file would take, at about four characters to a token,
-  not an exact count for any model. Sections is the number of headings.
+  not an exact count for any model. Sections is the number of headings. All four
+  describe the whole text, front matter included, and replace the old word count in
+  the corner.
 - **Formatted block** -- a table or a code block, drawn so it reads as a table or a
   code box rather than as the raw Markdown behind it. Where the cursor is, the raw
   text shows so it can be edited.
@@ -61,9 +66,11 @@ on the left and the text from its first line. Reloading after the file changes o
 disk, or recovering after a crash, also starts from the first line. They read by
 scrolling, and the outline follows, marking the section they are in.
 
-**Jump to a section.** Without touching the mouse, the owner moves into the outline,
-steps through the headings with the arrow keys, and picks one. The text jumps
-so that heading is at the top. They carry on reading from there, or jump again.
+**Jump to a section.** Without touching the mouse, the owner presses Ctrl+J to move
+into the outline, steps through the headings with the arrow keys, and presses Enter.
+The text jumps so that heading is at the top, and the outline keeps focus so they can
+jump again. Ctrl+J, or Escape, takes them back to the text. Clicking an entry jumps
+and puts them in the text.
 
 **Make a small edit.** The text is always editable. The owner clicks into it and types,
 as in Omawrite, and saves. The stats and the outline update as they type. Everything
@@ -163,15 +170,7 @@ are not good enough.
 
 ## Open questions
 
-- **How do the keyboard, the outline and the text share focus?** Which key moves
-  into the outline and back, and whether Tab can step through headings when Tab
-  inside the text may be wanted for typing. Resolved in the cycle that builds the
-  outline, by trying it.
 - **How are true table grids and code boxes drawn over the text?** Resolved in the
   later formatting cycle, on real LLM files.
-- **Should the outline hide deep heading levels, or let sections collapse?** Assumed
-  all levels shown; resolved by using it on long files.
 - **What else in LLM files needs formatting** -- nested lists, block quotes, images,
   diagrams? Not discussed; resolved by reading real files in Leaf.
-- **What should the outline and stats do with a file that has no headings, or one
-  that starts with front matter?** Not discussed; needed before the outline is built.

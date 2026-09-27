@@ -1,7 +1,8 @@
 ---
 type: state
 description: Leaf gets an outline pane to jump between sections from the keyboard, and four stat cards across the top, both fed by one scan of the text.
-status: active
+status: closed
+closed: 2026-09-27
 opened: 2026-09-27
 mode: run
 ---
@@ -10,11 +11,12 @@ mode: run
 
 ## Where we are
 
-Phase 2 done: all five slices closed. The spec's verification holds (see 2-3's notes). Not yet closed as a cycle or reconciled.
+Closed 2026-09-27. All five slices done; the spec's verification performed; the
+design and architecture reconciled.
 
 ## Next
 
-Close the cycle with close-work, and raise the rendered-Markdown question with the owner there.
+Nothing. This cycle is closed.
 
 ## Done
 
@@ -26,27 +28,22 @@ Close the cycle with close-work, and raise the rendered-Markdown question with t
 
 ## For a cold session
 
-- The findings came from a brainstorm with the owner on 2026-09-27, run by start-work.
-  The owner chose approach B: one shared line scan that the outline, the stats and the
-  highlighter all use, as the architecture describes. The smaller option, a heading
-  finder for the outline and stats only, was turned down because it would leave the
-  highlighter drawing `#` lines inside code as headings.
-- The owner asked for simple shortcuts: two keys, not three. Ctrl+J was agreed.
-- The owner is wary of anything touching files beyond their own edits. Nothing in
-  this cycle writes to the file; say so plainly whenever it comes up.
-- A newly launched Leaf window takes keyboard focus, and the owner's typing can land
-  in it (seen in 1-1). Capture on-screen checks straight after launch and close the
-  window; do not leave test windows open.
-- Phases 1 and 2 are committed on the `foundation-docs` branch, as the owner asked.
-  Later work goes on the same branch unless the owner says otherwise.
-- After 2-1 the owner asked whether Leaf can display files as rendered Markdown,
-  finding the styled raw text inherited from Omawrite "ugly" and unpolished. The
-  design rules out a separate reading view and chose styled raw text (approach A),
-  so this is a design question, not a slice. Options were put to the owner: A polish
-  the styled text, B add a rendered reading view with Qt's Markdown support and a key
-  to switch to editing (recommended), C a web renderer. The owner chose to finish this
-  cycle first and decide after it closes; B would replace the planned "tables and
-  code blocks" cycle. Raise it again at close-work.
-- Scope change 2026-09-27: Enter in the outline jumps but keeps focus in the outline
-  (see `scope-changes.md`). Asked whether Escape should also stop returning to the
-  text, the owner approved the slice without asking for that; Escape stays.
+- Delivered: one structure scan shared by the highlighter, the stat cards and the
+  outline; four stat cards across the top in place of the corner word count; the
+  outline pane with click-to-jump, a mark that follows reading, and Ctrl+J with the
+  arrows, Enter and Escape. The body text went from 20 to 17 px at the owner's
+  request.
+- One scope change: Enter in the outline jumps but keeps focus there
+  (`scope-changes.md`).
+- Verification: the suite (53) covers every check the spec lists; on screen, both
+  themes were captured for the cards, the pane, the mark, "No headings" and a fenced
+  `#` line; the owner tried clicking, the mark and the keyboard; a file opened and
+  closed was byte-for-byte unchanged.
+- Left open at close: the owner finds the styled raw text "ugly" and asked for
+  rendered Markdown. Options put to them: A polish the styled text, B a rendered
+  reading view with Qt's Markdown support and a key to edit (recommended; it would
+  replace the planned tables-and-code cycle), C a web renderer. The design rules out a
+  reading view, so B starts by changing the design.
+- A Leaf window launched from a session may take keyboard focus from the owner's
+  window; their typing once landed in a test file. Capture straight after launch,
+  close at once, and send keys only when Leaf is the active window.

@@ -86,8 +86,10 @@ quotes and search matches, and hides inline markers away from the cursor. It rem
 the single definition of inline Markdown, which the editor also uses to step the caret
 over hidden markers. It gains block awareness by applying the structure scan's rules
 as it goes, carrying whether a line is inside a code block on to the next line, so
-typing an opening fence restyles everything below it at once. It changes how text
-looks, never what the text is.
+typing an opening fence restyles everything below it at once. Front matter depends on
+a closing line that can be far from an edit, so the highlighter works out its extent
+when it styles the first line, and the core's recount asks it to check again after
+typing. It changes how text looks, never what the text is.
 
 **System theme.** Reads the desktop's dark-mode and text-size settings through the
 desktop portal and reports changes as they happen. The core receives them and passes
@@ -109,8 +111,10 @@ left at the end of the new text and the view follows it there.
 window works out which heading is at the top and marks it in the outline. Picking an
 outline entry scrolls the editor so that heading's position is at the top of the view.
 Positions come from the last scan, so during a pause in typing the outline can be a
-moment behind the text. Nothing here touches the core or the file. Which keys move
-focus into the outline and back is decided in the cycle that builds it.
+moment behind the text. Nothing here touches the core or the file. Ctrl+J moves focus
+between the text and the outline; there, the arrows move a selection without moving
+the text, and Enter jumps while keeping focus in the outline. A picked heading stays
+marked, even one too near the end to reach the top, until the view next moves.
 
 **Editing.** A keystroke changes the editor's document. The highlighter restyles the
 changed lines; the core marks the document modified, schedules a recovery snapshot,
@@ -245,9 +249,10 @@ such as the file manager, get Leaf.
 colours are set before it is read, unrecognised lines are ignored, and the watcher
 re-reads it when the theme changes.
 
-**Unusual documents.** A file with no headings has an empty outline and a section
-count of zero; what the outline pane shows then, and how front matter is shown, are
-decided in the cycle that builds the outline. An unclosed code fence makes the rest of
+**Unusual documents.** A file with no headings has an empty outline, which the pane
+says, and a section count of zero. Front matter is left out of the outline but
+counted in words, lines and tokens; a first line of `---` with no closing line is not
+front matter, and the file is read as ordinary Markdown. An unclosed code fence makes the rest of
 the file code, as Markdown itself defines; the outline then lists no headings past it. A table with
 ragged rows is lined up as far as its rows allow. Nothing in the file is corrected.
 

@@ -63,6 +63,14 @@ do not act past it.
   `hyprctl dispatch 'hl.dsp.window.close({ window = "pid:<pid>" })'`; killing the
   process skips saving settings and leaves a recovery lock behind. Keys sent with
   `wtype` reach the app but not Hyprland's own shortcuts.
+- A Leaf window launched from a session can take keyboard focus from the owner's
+  window, and their typing then lands in the file. Capture straight after launch,
+  close the window at once, and send keys only when `hyprctl activewindow -j` shows
+  Leaf's pid.
+- In tests, a bare `QTextDocument` is never restyled unless it has a layout
+  (`documentLayout()`) and the new highlighter's queued first pass has run
+  (`processEvents()`). QML list and Repeater delegates are not found by `findChild`;
+  walk the window's visual items instead.
 - `xdg-open file.md` opens Neovim, not Leaf: it guesses types from contents. Test the
   Markdown default with `gio open`, which goes by the file name, as the file manager
   does.
