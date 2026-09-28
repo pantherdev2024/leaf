@@ -10,14 +10,14 @@ mode: run
 
 ## Where we are
 
-Phase 2, slice 2-1 closed and docs/architecture.md reconciled. 2-2 switch-in-place not
-yet detailed. Everything through 2-1 is committed.
+All slices done: phase 2 closed with 2-4, and the spec's verification run (see 2-4's
+notes). docs/architecture.md reconciled. Everything is committed.
 
 ## Next
 
-Detail and execute slice 2-2 switch-in-place: `execute-slice` on `reading-view`.
-Effort medium (the phase default), lower than 2-1's high, so the owner may switch
-model first.
+The owner checks what a session cannot -- a web link opening, copying from the page,
+a live theme change, the running app -- and settles the spec's open question on
+showing which view is active. Then close the cycle: `close-work` on `reading-view`.
 
 ## Done
 
@@ -25,6 +25,9 @@ model first.
 - 2026-09-27 1-2 reading-view-window
 - 2026-09-27 1-3 tables-and-code
 - 2026-09-27 2-1 outline-in-reading
+- 2026-09-27 2-2 switch-in-place
+- 2026-09-27 2-3 find-in-reading
+- 2026-09-27 2-4 print-and-verify
 
 ## For a cold session
 
@@ -40,13 +43,9 @@ model first.
   today's sizes) rather than the T3 Code look, and to fix the bullets; 1-3 did so.
 - Two scope changes (`scope-changes.md`): the display copy closes void HTML tags such
   as `<br>`; a file opens with the keyboard focus in the outline.
-- Still stopgaps until 2-2 and 2-3: Ctrl+F and Ctrl+H switch to editing first, and
-  Ctrl+E keeps only the scroll share. The outline, Ctrl+J and the mark work in the
-  reading view since 2-1.
-- Read 2-1's notes before 2-2: `headingY(index)` is the one way to ask where a
-  heading is in the view shown. Read 1-3's notes too: block numbers in the rendered
-  document include the empty blocks frames add; the code label is document text that
-  find (2-3) will match; the header shade is drawn by the window, so printing (2-4)
-  must draw it itself.
+- No stopgaps left: the outline, Ctrl+J, the mark, Ctrl+E's place and find all work in
+  the reading view; Ctrl+H switches to editing by design.
+- Printing goes through the renderer in light colours since 2-4; the header shade is
+  drawn by the window on screen and set on the cells for paper.
 - Judge the look only from the real window, never from the offscreen harness in
   `/tmp/mdreal`. AGENTS.md says how to capture it headless, light theme included.

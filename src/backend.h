@@ -14,6 +14,7 @@
 #include "readingrenderer.h"
 
 class MarkdownHighlighter;
+class QPrinter;
 class QTextDocument;
 class QWindow;
 class QLockFile;
@@ -85,6 +86,9 @@ public:
     // backgrounds, so the window draws them behind it.
     Q_INVOKABLE QVariantList readingHeaderRows() const;
     Q_INVOKABLE QColor readingShade() const;
+    // Where `query` is found in the reading view's text as shown, ignoring case:
+    // each match's start and end in its document, in order.
+    Q_INVOKABLE QVariantList findInReading(const QString &query) const;
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();
@@ -96,6 +100,12 @@ public:
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
     Q_INVOKABLE void printDocument();
+    // Fills `document` with the page as printed: the current text through the
+    // reading renderer, in light colours whatever the theme, laid out on pages of
+    // `pageSize` (in the reading view's pixels).
+    void buildPrintDocument(QTextDocument *document, const QSizeF &pageSize) const;
+    // Prints the current text as buildPrintDocument lays it out.
+    void printTo(QPrinter *printer) const;
     Q_INVOKABLE void newWindow();
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
@@ -125,6 +135,8 @@ signals:
 
 private:
     ReadingRenderer::Style readingStyle() const;
+    ReadingRenderer::Style readingStyleIn(const QColor &background, const QColor &foreground,
+                                          const QColor &accent, bool dark) const;
     void matchReadingHeadings();
     void loadDocumentText(const QString &text);
     void setFileUrl(const QUrl &url);

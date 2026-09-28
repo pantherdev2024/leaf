@@ -74,18 +74,18 @@ by the jump, the mark, switching and find.
   are never marked. Done when: tests cover matching, including a heading with marks
   and an underlined heading that does not shift it, and on screen the click, Ctrl+J
   and the mark work in the reading view. Depends on: 1-3. Effort: high.
-- [ ] 2-2 switch-in-place -- Keep the place across Ctrl+E: the same marked section
+- [x] 2-2 switch-in-place -- Keep the place across Ctrl+E: the same marked section
   and the same share of it, the editor's cursor at the first line in view, its undo
   history kept, and Ctrl+E added to the Ctrl+? list. Done when: tests show switching
   keeps the marked section and leaves the text and undo history untouched, and on
   screen a switch mid-section lands at the same place both ways. Depends on: 2-1.
-- [ ] 2-3 find-in-reading -- Find in the reading view: Ctrl+F matches the text as
+- [x] 2-3 find-in-reading -- Find in the reading view: Ctrl+F matches the text as
   shown and highlights it there without touching the editor, Ctrl+G and the buttons
   step and scroll, the bar keeps its query across Ctrl+E and searches again, and
   Ctrl+H switches to editing with replace open. Done when: tests cover matching and
   highlighting in the rendered document and the query surviving a switch, and on
   screen find works in the reading view. Depends on: 2-2.
-- [ ] 2-4 print-and-verify -- Print through the renderer in light colours from either
+- [x] 2-4 print-and-verify -- Print through the renderer in light colours from either
   view, unsaved edits included, and run the spec's verification. Done when: a page
   printed to a file shows the reading view's styling without front matter or tag
   lines, and every check in the spec's Verification passes, including a file opened,

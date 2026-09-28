@@ -299,12 +299,37 @@ void Backend::printDocument() {
     if (dialog.windowHandle() && m_parentWindow)
         dialog.windowHandle()->setTransientParent(m_parentWindow);
 
-    if (dialog.exec() == QDialog::Accepted) {
-        QTextDocument rendered;
-        rendered.setDefaultFont(m_document->defaultFont());
-        rendered.setMarkdown(currentDocumentText());
-        rendered.print(&printer);
-    }
+    if (dialog.exec() == QDialog::Accepted)
+        printTo(&printer);
+}
+
+void Backend::buildPrintDocument(QTextDocument *document, const QSizeF &pageSize) const {
+    // Paper is white, so the light theme's own defaults, whatever is on screen,
+    // at the body size the reading view has at the standard text size.
+    ReadingRenderer::Style style = readingStyleIn(QColor(QStringLiteral("#ffffff")),
+                                                  QColor(QStringLiteral("#222324")),
+                                                  QColor(QStringLiteral("#2077b2")), false);
+    style.bodyPixelSize = readingBodyPixelSize;
+    style.columnWidth = pageSize.width();
+    document->setPageSize(pageSize);
+    ReadingRenderer::render(document, currentDocumentText(), style);
+    ReadingRenderer::shadeHeaderCells(document, style.shade);
+}
+
+void Backend::printTo(QPrinter *printer) const {
+    // Qt gives an unsized document 2 cm margins when the printer has none, as a
+    // PDF printer does; a sized one gets none, so they are set here.
+    const QMarginsF margins = printer->pageLayout().margins(QPageLayout::Millimeter);
+    if (margins.left() < 10 && margins.top() < 10 && margins.right() < 10 && margins.bottom() < 10)
+        printer->setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
+
+    // A document with a page size is printed scaled from screen pixels to the
+    // printer's, so the page is sized from the printable area at 96 pixels to
+    // the inch, the reading view's own measure.
+    const QSizeF points = printer->pageLayout().paintRect(QPageLayout::Point).size();
+    QTextDocument printed;
+    buildPrintDocument(&printed, points * 96.0 / 72.0);
+    printed.print(printer);
 }
 
 void Backend::newWindow() {
@@ -448,8 +473,13 @@ void Backend::renderReadingAtWidth(qreal columnWidth) {
 }
 
 ReadingRenderer::Style Backend::readingStyle() const {
-    const QColor background(m_themeBackground);
-    const QColor foreground(m_themeForeground);
+    return readingStyleIn(QColor(m_themeBackground), QColor(m_themeForeground),
+                          QColor(m_themeAccent), m_darkMode);
+}
+
+ReadingRenderer::Style Backend::readingStyleIn(const QColor &background,
+                                               const QColor &foreground,
+                                               const QColor &accent, bool dark) const {
     // A share of the way from the page's colour to the text's.
     const auto towardText = [&](qreal share) {
         return QColor::fromRgbF(
@@ -459,10 +489,10 @@ ReadingRenderer::Style Backend::readingStyle() const {
     };
     ReadingRenderer::Style style;
     style.text = foreground;
-    style.accent = QColor(m_themeAccent);
+    style.accent = accent;
     // A faint wash of the text colour over the page, visible in either mode.
-    style.shade = towardText(m_darkMode ? 0.12 : 0.08);
-    style.line = towardText(m_darkMode ? 0.3 : 0.25);
+    style.shade = towardText(dark ? 0.12 : 0.08);
+    style.line = towardText(dark ? 0.3 : 0.25);
     style.dim = towardText(0.55);
     style.bodyPixelSize = qMax<qreal>(1, qRound(readingBodyPixelSize * m_textScale));
     style.proseFamily = QStringLiteral("iA Writer Duo S");
@@ -514,6 +544,21 @@ QVariantList Backend::readingHeaderRows() const {
                                 {QStringLiteral("height"), row.height()}});
     }
     return rows;
+}
+
+QVariantList Backend::findInReading(const QString &query) const {
+    QVariantList matches;
+    if (!m_readingDocument || query.isEmpty())
+        return matches;
+    // The document's own search, so positions are the page's even around its
+    // frames, which its plain text does not count the same way.
+    QTextCursor found = m_readingDocument->find(query, 0);
+    while (!found.isNull()) {
+        matches.append(QVariantMap{{QStringLiteral("start"), found.selectionStart()},
+                                   {QStringLiteral("end"), found.selectionEnd()}});
+        found = m_readingDocument->find(query, found.selectionEnd());
+    }
+    return matches;
 }
 
 QColor Backend::readingShade() const {

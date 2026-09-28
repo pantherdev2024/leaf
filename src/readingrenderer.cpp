@@ -538,6 +538,20 @@ QList<QRectF> headerRows(const QTextDocument *document) {
     return rows;
 }
 
+void shadeHeaderCells(QTextDocument *document, const QColor &shade) {
+    QTextCursor edit(document);
+    edit.beginEditBlock();
+    for (QTextTable *table : tablesIn(document)) {
+        for (int column = 0; column < table->columns() && table->rows() > 0; ++column) {
+            QTextTableCell cell = table->cellAt(0, column);
+            QTextTableCellFormat format = cell.format().toTableCellFormat();
+            format.setBackground(shade);
+            cell.setFormat(format);
+        }
+    }
+    edit.endEditBlock();
+}
+
 QList<RenderedHeading> headings(const QTextDocument *document) {
     QList<RenderedHeading> found;
     for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {

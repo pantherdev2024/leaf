@@ -60,4 +60,8 @@ QList<int> matchHeadings(const QList<OutlineEntry> &outline,
 // shade: it draws no cell backgrounds of its own.
 QList<QRectF> headerRows(const QTextDocument *document);
 
+// Gives each table's header cells the shade as their own background, which Qt's
+// printing draws, unlike the reading view.
+void shadeHeaderCells(QTextDocument *document, const QColor &shade);
+
 }  // namespace ReadingRenderer

@@ -38,7 +38,10 @@ ApplicationWindow {
     property color readingShade: "transparent"
     property bool searchOpen: false
     property bool searchUpdating: false
+    // Each match's start and end, in the text of the view shown.
     property var searchMatches: []
+    // The reading view's highlights, for the matches in and near the view only.
+    property var readingMatchBoxes: []
     property int searchMatchIndex: -1
     property url pendingOpenUrl
     property string pendingAction: ""
@@ -53,11 +56,17 @@ ApplicationWindow {
     // document opens reading; a new window with nothing to read opens editing.
     property bool reading: false
 
-    // Until find works in the reading view, the find bar closes when the page is
-    // shown, or its matches would move the hidden text's view.
+    // The find bar stays open across a switch, and its matches are found again in
+    // the view shown once it is in place (restorePlace). Replace works on the
+    // editable text only, and the editor's highlights go while the page is shown.
     onReadingChanged: {
-        if (reading && searchOpen)
-            closeSearch();
+        if (!reading || !searchOpen)
+            return;
+        replaceOpen = false;
+        searchUpdating = true;
+        backend.setSearchHighlight("", -1);
+        editor.deselect();
+        searchUpdating = false;
     }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
@@ -175,16 +184,66 @@ ApplicationWindow {
             markedHeading = headingAtTop();
     }
 
-    // How far down the page the view is, as a share of how far it can scroll.
-    function scrollShare() {
-        return editorFlick.contentY / Math.max(1, editorFlick.contentHeight - editorFlick.height);
+    // Where a section runs in the view shown: from its heading, or the top above
+    // the first heading, to the next heading the view shows, or the page's end.
+    function sectionBounds(section) {
+        var view = reading ? reader : editor;
+        var start = section < 0 ? 0 : headingY(section);
+        var end = view.y + view.height;
+        for (var next = section + 1; next < backend.outline.length; ++next) {
+            var y = headingY(next);
+            if (y !== undefined) {
+                end = y;
+                break;
+            }
+        }
+        return {start: start, end: Math.max(end, start + 1)};
     }
 
-    // Once the newly shown view has its height, bring it to the same share.
-    function restoreScrollShare(share) {
+    // The place being read: the section at the top of the view, as the outline
+    // entry marking it (-1 above the first heading), and how far through it the
+    // view is, as a share of its length. Two layouts of the same text differ in
+    // height, so a share of the section finds the same place where a share of
+    // the page would not.
+    function currentPlace() {
+        // At the very top, above the first line, the place is the top itself.
+        if (editorFlick.contentY <= 0)
+            return {section: -1, share: 0, atTop: true};
+        var section = headingAtTop();
+        var bounds = sectionBounds(section);
+        var share = (editorFlick.contentY - bounds.start) / (bounds.end - bounds.start);
+        return {section: section, share: Math.min(1, Math.max(0, share)), atTop: false};
+    }
+
+    // Once the view shown has its layout, bring it to the same place and mark the
+    // section. A section the reading view has no heading for gives way to the
+    // nearest one before it that it has. In the editor the cursor goes to the
+    // start of the line at the top first, so its own scrolling does not pull the
+    // view off the place.
+    function restorePlace(place) {
         Qt.callLater(function() {
-            editorFlick.scrollTo(editorFlick.clampContentY(
-                share * (editorFlick.contentHeight - editorFlick.height)));
+            if (place.atTop) {
+                if (!reading)
+                    editor.cursorPosition = 0;
+                editorFlick.scrollTo(0);
+                markHeld = false;
+                updateMark();
+                if (searchOpen)
+                    refindFromView();
+                return;
+            }
+            var section = place.section;
+            while (section >= 0 && headingY(section) === undefined)
+                --section;
+            var bounds = sectionBounds(section);
+            var y = editorFlick.clampContentY(bounds.start + place.share * (bounds.end - bounds.start));
+            if (!reading)
+                editor.cursorPosition = editor.positionAt(0, Math.max(0, y - editor.y) + 1);
+            editorFlick.scrollTo(y);
+            markedHeading = section;
+            markHeld = true;
+            if (searchOpen)
+                refindFromView();
         });
     }
 
@@ -206,21 +265,21 @@ ApplicationWindow {
     }
 
     function showReading() {
-        var share = scrollShare();
+        var place = currentPlace();
         renderPage();
         reading = true;
-        updateMark();
         reader.forceActiveFocus();
-        restoreScrollShare(share);
+        restorePlace(place);
     }
 
     function showEditing(keepPlace) {
-        var share = scrollShare();
+        var place = currentPlace();
         reading = false;
         editor.forceActiveFocus();
         if (keepPlace)
-            restoreScrollShare(share);
-        updateMark();
+            restorePlace(place);
+        else
+            updateMark();
     }
 
     // The page is laid out at the reader's width, and the header rows' shade is
@@ -239,9 +298,9 @@ ApplicationWindow {
     function rerenderReading() {
         if (!reading)
             return;
-        var share = scrollShare();
+        var place = currentPlace();
         renderPage();
-        restoreScrollShare(share);
+        restorePlace(place);
     }
 
     onMarkedHeadingChanged: showMarkInOutline()
@@ -257,32 +316,111 @@ ApplicationWindow {
             : Window.FullScreen;
     }
 
-    function updateSearch() {
-        var matches = [];
+    // Matches ignore case. In the editor they are in its text, marks and all; on
+    // the page, in the text as it is shown.
+    function findMatches() {
         var query = searchField.text;
-        if (query.length > 0) {
-            var haystack = editor.text.toLocaleLowerCase();
-            var needle = query.toLocaleLowerCase();
-            var position = 0;
-            while ((position = haystack.indexOf(needle, position)) !== -1) {
-                matches.push(position);
-                position += Math.max(1, needle.length);
-            }
+        if (query.length === 0)
+            return [];
+        if (reading)
+            return backend.findInReading(query);
+        var matches = [];
+        var haystack = editor.text.toLocaleLowerCase();
+        var needle = query.toLocaleLowerCase();
+        var position = 0;
+        while ((position = haystack.indexOf(needle, position)) !== -1) {
+            matches.push({start: position, end: position + needle.length});
+            position += Math.max(1, needle.length);
         }
-        searchMatches = matches;
-        searchMatchIndex = matches.length > 0 ? 0 : -1;
+        return matches;
+    }
+
+    function updateSearch() {
+        searchMatches = findMatches();
+        searchMatchIndex = searchMatches.length > 0 ? 0 : -1;
         showSearchMatch();
     }
 
+    // Found again after a switch or on reopening, from the first match at or
+    // below the top of the view, so the view does not jump away from its place.
+    function refindFromView() {
+        searchMatches = findMatches();
+        var low = 0;
+        var high = searchMatches.length;
+        while (low < high) {
+            var middle = Math.floor((low + high) / 2);
+            if (matchRect(middle).y < editorFlick.contentY)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        searchMatchIndex = searchMatches.length === 0 ? -1 : low % searchMatches.length;
+        showSearchMatch();
+    }
+
+    // Where a match's first character is, in the scrolling area's coordinates.
+    function matchRect(index) {
+        var view = reading ? reader : editor;
+        var rect = view.positionToRectangle(searchMatches[index].start);
+        return Qt.rect(view.x + rect.x, view.y + rect.y, rect.width, rect.height);
+    }
+
     function showSearchMatch() {
-        var start = searchMatchIndex >= 0 ? searchMatches[searchMatchIndex] : -1;
+        var match = searchMatchIndex >= 0 ? searchMatches[searchMatchIndex] : null;
+        if (reading) {
+            if (match) {
+                var rect = matchRect(searchMatchIndex);
+                editorFlick.ensureVisible(rect.y, rect.y + rect.height);
+            }
+            showReadingMatches();
+            return;
+        }
         searchUpdating = true;
-        backend.setSearchHighlight(searchField.text, start);
-        if (start >= 0) {
-            editor.select(start, start + searchField.text.length);
+        backend.setSearchHighlight(searchField.text, match ? match.start : -1);
+        if (match) {
+            editor.select(match.start, match.end);
             editorFlick.ensureCursorVisible();
         }
         searchUpdating = false;
+    }
+
+    // Boxes over the matches from a screen above the view to a screen below it,
+    // found by a binary search, since a common letter can match thousands of times.
+    // A match wrapped onto a second line gets a box on each.
+    function showReadingMatches() {
+        if (!reading || !searchOpen || searchMatches.length === 0) {
+            readingMatchBoxes = [];
+            return;
+        }
+        var top = editorFlick.contentY - editorFlick.height;
+        var bottom = editorFlick.contentY + 2 * editorFlick.height;
+        var low = 0;
+        var high = searchMatches.length;
+        while (low < high) {
+            var middle = Math.floor((low + high) / 2);
+            if (matchRect(middle).y < top)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        var boxes = [];
+        for (var i = low; i < searchMatches.length; ++i) {
+            var first = reader.positionToRectangle(searchMatches[i].start);
+            if (reader.y + first.y > bottom)
+                break;
+            var last = reader.positionToRectangle(searchMatches[i].end);
+            var current = i === searchMatchIndex;
+            if (Math.abs(first.y - last.y) < 1) {
+                boxes.push({x: first.x, y: first.y, width: last.x - first.x,
+                            height: first.height, current: current});
+            } else {
+                boxes.push({x: first.x, y: first.y, width: reader.width - first.x,
+                            height: first.height, current: current});
+                boxes.push({x: 0, y: last.y, width: last.x, height: last.height,
+                            current: current});
+            }
+        }
+        readingMatchBoxes = boxes;
     }
 
     function moveSearch(direction) {
@@ -295,6 +433,7 @@ ApplicationWindow {
 
     function closeSearch() {
         searchOpen = false;
+        readingMatchBoxes = [];
         searchUpdating = true;
         backend.setSearchHighlight("", -1);
         editor.deselect();
@@ -319,10 +458,15 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+H"
         context: Qt.ApplicationShortcut
+        // Replace works on the editable text, so it opens there, in place; the
+        // matches are found once the editor is in place.
         onActivated: {
-            if (win.reading)
-                win.showEditing(true);
+            var switching = win.reading;
             searchOpen = true;
+            if (switching)
+                win.showEditing(true);
+            else
+                win.refindFromView();
             replaceOpen = true;
             searchField.forceActiveFocus();
             searchField.selectAll();
@@ -419,9 +563,8 @@ ApplicationWindow {
         sequence: "Ctrl+F"
         context: Qt.ApplicationShortcut
         onActivated: {
-            if (win.reading)
-                win.showEditing(true);
             searchOpen = true;
+            win.refindFromView();
             searchField.forceActiveFocus();
             searchField.selectAll();
         }
@@ -558,7 +701,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+J  Outline\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+J  Outline\nCtrl+E  Reading / Editing\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -853,6 +996,8 @@ ApplicationWindow {
             onMovementStarted: wheelScroll.stop()
 
             onContentYChanged: {
+                if (win.reading && win.searchOpen)
+                    Qt.callLater(win.showReadingMatches);
                 win.markHeld = false;
                 win.updateMark();
             }
@@ -900,20 +1045,23 @@ ApplicationWindow {
 
             // Keep the editing caret within the viewport so writing past the
             // bottom edge scrolls the page along with the text.
+            // Scrolls the least that shows a span of the page with a margin round it.
+            function ensureVisible(top, bottom) {
+                var margin = win.editorFontPixelSize * 2;
+                var maxContentY = Math.max(0, contentHeight - height);
+                if (bottom + margin > contentY + height)
+                    scrollTo(Math.min(maxContentY, bottom + margin - height));
+                else if (top - margin < contentY)
+                    scrollTo(Math.max(0, top - margin));
+            }
+
             function ensureCursorVisible() {
                 // The editor is hidden while reading, and its cursor must not
                 // move the page.
                 if (win.reading)
                     return;
-                var margin = win.editorFontPixelSize * 2;
                 var cursorTop = editor.y + editor.cursorRectangle.y;
-                var cursorBottom = cursorTop + editor.cursorRectangle.height;
-                var maxContentY = Math.max(0, contentHeight - height);
-
-                if (cursorBottom + margin > contentY + height)
-                    scrollTo(Math.min(maxContentY, cursorBottom + margin - height));
-                else if (cursorTop - margin < contentY)
-                    scrollTo(Math.max(0, cursorTop - margin));
+                ensureVisible(cursorTop, cursorTop + editor.cursorRectangle.height);
             }
 
             TextEdit {
@@ -1228,6 +1376,7 @@ ApplicationWindow {
                 onContentHeightChanged: {
                     Qt.callLater(win.showHeaderShades);
                     Qt.callLater(win.updateMark);
+                    Qt.callLater(win.showReadingMatches);
                 }
 
                 Timer {
@@ -1242,6 +1391,23 @@ ApplicationWindow {
                 }
 
                 Component.onCompleted: backend.attachReadingDocument(textDocument)
+            }
+
+            // Find's highlights on the page, drawn over it and a little clear so the
+            // text shows through: the page's own boxes would hide anything beneath.
+            Repeater {
+                model: win.readingMatchBoxes
+
+                Rectangle {
+                    x: reader.x + modelData.x
+                    y: reader.y + modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    opacity: 0.5
+                    color: modelData.current
+                        ? (win.darkMode ? "#b36b20" : "#ffad42")
+                        : (win.darkMode ? "#725b18" : "#ffe58a")
+                }
             }
         }
 
@@ -1315,6 +1481,7 @@ ApplicationWindow {
 
                     TextInput {
                         id: searchField
+                        objectName: "searchField"
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -1387,9 +1554,8 @@ ApplicationWindow {
                     text: "Replace"
                     onClicked: {
                         if (win.searchMatchIndex < 0) return;
-                        var start = win.searchMatches[win.searchMatchIndex];
-                        EditorMutations.replaceRange(editor, start,
-                                                     start + searchField.text.length,
+                        var match = win.searchMatches[win.searchMatchIndex];
+                        EditorMutations.replaceRange(editor, match.start, match.end,
                                                      replaceField.text);
                         win.updateSearch();
                     }
@@ -1401,9 +1567,8 @@ ApplicationWindow {
                     onClicked: {
                         if (searchField.text.length === 0) return;
                         for (var i = win.searchMatches.length - 1; i >= 0; --i) {
-                            var start = win.searchMatches[i];
-                            EditorMutations.replaceRange(editor, start,
-                                                         start + searchField.text.length,
+                            var match = win.searchMatches[i];
+                            EditorMutations.replaceRange(editor, match.start, match.end,
                                                          replaceField.text);
                         }
                         win.updateSearch();

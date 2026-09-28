@@ -9,6 +9,7 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QPrinter>
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -1554,26 +1555,103 @@ private slots:
         backend.discardRecovery();
     }
 
-    void closesTheFindBarWhenTheReadingViewIsShown() {
+    // The page shows `bold text` where the file has `**bold** text`, so the query
+    // is found while reading and not while editing, and again on returning.
+    void findsTheTextAsTheViewShowsItAcrossSwitches() {
         QTemporaryDir directory;
-        const QString path = writeFile(directory.filePath(QStringLiteral("find.md")),
-                                       QStringLiteral("Find this word.\n"));
-
+        const QString text = QStringLiteral("Some **bold** text.\n");
+        const QString path = writeFile(directory.filePath(QStringLiteral("find.md")), text);
         Backend backend;
         QQmlEngine engine;
         QScopedPointer<QObject> window(createActiveWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        QObject *field = window->findChild<QObject *>(QStringLiteral("searchField"));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+
         press(window.data(), Qt::Key_F, Qt::ControlModifier);
-        QCOMPARE(window->property("reading").toBool(), false);
-        QCOMPARE(window->property("searchOpen").toBool(), true);
+        QCOMPARE(window->property("reading").toBool(), true);
+        QVERIFY(field->property("activeFocus").toBool());
+        field->setProperty("text", QStringLiteral("bold text"));
+        QCOMPARE(window->property("searchMatches").toList().size(), 1);
+        QCOMPARE(window->property("readingMatchBoxes").toList().size(), 1);
+        // The editor is left alone while the page is searched.
+        QCOMPARE(editor->property("selectedText").toString(), QString());
+        QCOMPARE(editor->property("text").toString(), text);
 
         press(window.data(), Qt::Key_E, Qt::ControlModifier);
+        QCOMPARE(window->property("reading").toBool(), false);
+        QTRY_COMPARE(window->property("searchMatches").toList().size(), 0);
+        QCOMPARE(window->property("searchOpen").toBool(), true);
+        QCOMPARE(field->property("text").toString(), QStringLiteral("bold text"));
 
+        press(window.data(), Qt::Key_E, Qt::ControlModifier);
         QCOMPARE(window->property("reading").toBool(), true);
-        QCOMPARE(window->property("searchOpen").toBool(), false);
-        QVERIFY(window->findChild<QObject *>(QStringLiteral("readingView"))
+        QTRY_COMPARE(window->property("searchMatches").toList().size(), 1);
+        QCOMPARE(window->property("searchOpen").toBool(), true);
+    }
+
+    void stepsToAMatchFurtherDownThePage() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+            QStringLiteral("Needle at the top.\n\n") + headedDocument()
+                + QStringLiteral("\nNeedle at the end.\n"));
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+        QObject *field = window->findChild<QObject *>(QStringLiteral("searchField"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+
+        press(window.data(), Qt::Key_F, Qt::ControlModifier);
+        field->setProperty("text", QStringLiteral("needle"));
+        QCOMPARE(window->property("searchMatches").toList().size(), 2);
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 0);
+        QCOMPARE(flick->property("contentY").toReal(), 0.0);
+
+        press(window.data(), Qt::Key_G, Qt::ControlModifier);
+
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 1);
+        QVERIFY(flick->property("contentY").toReal() > 0);
+        const int end = window->property("searchMatches").toList().at(1).toMap()
+                            .value(QStringLiteral("start")).toInt();
+        QObject *reader = window->findChild<QObject *>(QStringLiteral("readingView"));
+        QRectF match;
+        QMetaObject::invokeMethod(reader, "positionToRectangle", Q_RETURN_ARG(QRectF, match),
+                                  Q_ARG(int, end));
+        const qreal top = reader->property("y").toReal() + match.y();
+        QVERIFY(top >= flick->property("contentY").toReal());
+        QVERIFY(top + match.height() <= flick->property("contentY").toReal()
+                                          + flick->property("height").toReal());
+        QTRY_VERIFY(!window->property("readingMatchBoxes").toList().isEmpty());
+        QCOMPARE(window->property("reading").toBool(), true);
+    }
+
+    void opensReplaceInTheEditingViewFromTheReadingView() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("find.md")),
+                                       QStringLiteral("Find this word.\n"));
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        press(window.data(), Qt::Key_H, Qt::ControlModifier);
+
+        QCOMPARE(window->property("reading").toBool(), false);
+        QCOMPARE(window->property("searchOpen").toBool(), true);
+        QCOMPARE(window->property("replaceOpen").toBool(), true);
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("searchField"))
                     ->property("activeFocus").toBool());
+
+        // Back on the page, replace closes and find stays.
+        press(window.data(), Qt::Key_E, Qt::ControlModifier);
+        QCOMPARE(window->property("reading").toBool(), true);
+        QCOMPARE(window->property("searchOpen").toBool(), true);
+        QCOMPARE(window->property("replaceOpen").toBool(), false);
     }
 
     void rebuildsTheReadingViewOnReload() {
@@ -1760,6 +1838,216 @@ private slots:
         flick->setProperty("contentY", flick->property("contentHeight").toReal()
                                            - flick->property("height").toReal());
         QCOMPARE(window->property("markedHeading").toInt(), 8);
+    }
+
+    // Halfway through a section in one view is halfway through it in the other,
+    // though the two lay the section out at different heights.
+    void switchesViewsKeepingTheSectionAndTheShareThroughIt() {
+        QTemporaryDir directory;
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+
+        const qreal pageThree = readingHeadingTop(window.data(), backend, 3);
+        const qreal pageFour = readingHeadingTop(window.data(), backend, 4);
+        flick->setProperty("contentY", pageThree + (pageFour - pageThree) / 2);
+        QCOMPARE(window->property("markedHeading").toInt(), 3);
+
+        press(window.data(), Qt::Key_E, Qt::ControlModifier);
+
+        const qreal textThree = lineTop(editor, text.indexOf(QStringLiteral("## Section 3")));
+        const qreal textFour = lineTop(editor, text.indexOf(QStringLiteral("## Section 4")));
+        QCOMPARE(window->property("reading").toBool(), false);
+        QTRY_VERIFY2(qAbs(flick->property("contentY").toReal() - (textThree + (textFour - textThree) / 2)) <= 2,
+                     qPrintable(QString::number(flick->property("contentY").toReal())));
+        QCOMPARE(window->property("markedHeading").toInt(), 3);
+        QVERIFY(editor->property("activeFocus").toBool());
+        // The cursor is at the start of the line at the top of the view.
+        const int cursor = editor->property("cursorPosition").toInt();
+        QCOMPARE(text.at(cursor - 1), QLatin1Char('\n'));
+        QVERIFY(qAbs(lineTop(editor, cursor) - flick->property("contentY").toReal())
+                < window->property("editorFontPixelSize").toInt() * 2);
+
+        press(window.data(), Qt::Key_E, Qt::ControlModifier);
+
+        QCOMPARE(window->property("reading").toBool(), true);
+        QTRY_VERIFY2(qAbs(flick->property("contentY").toReal() - (pageThree + (pageFour - pageThree) / 2))
+                         <= (pageFour - pageThree) * 0.02,
+                     qPrintable(QString::number(flick->property("contentY").toReal())));
+        QCOMPARE(window->property("markedHeading").toInt(), 3);
+    }
+
+    void keepsThePlaceAboveTheFirstHeadingAcrossASwitch() {
+        QTemporaryDir directory;
+        QString text;
+        for (int line = 1; line <= 80; ++line)
+            text += QStringLiteral("Preamble line %1.\n").arg(line);
+        text += QStringLiteral("\n") + headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("preamble.md")), text);
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+
+        flick->setProperty("contentY", readingHeadingTop(window.data(), backend, 0) / 2);
+        QCOMPARE(window->property("markedHeading").toInt(), -1);
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "showEditing", Q_ARG(QVariant, true)));
+
+        const qreal firstHeading = lineTop(editor, text.indexOf(QStringLiteral("# Headed")));
+        QTRY_VERIFY2(qAbs(flick->property("contentY").toReal() - firstHeading / 2) <= 2,
+                     qPrintable(QString::number(flick->property("contentY").toReal())));
+        QCOMPARE(window->property("markedHeading").toInt(), -1);
+    }
+
+    void keepsTheTextAndItsUndoHistoryAcrossSwitches() {
+        QTemporaryDir directory;
+        const QString text = headedDocument();
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")), text);
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+
+        press(window.data(), Qt::Key_E, Qt::ControlModifier);
+        QVERIFY(editor->property("activeFocus").toBool());
+        editor->setProperty("cursorPosition", 0);
+        for (const char key : {'x', 'y', 'z'})
+            QTest::keyClick(qobject_cast<QQuickWindow *>(window.data()), key);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("xyz") + text);
+
+        press(window.data(), Qt::Key_E, Qt::ControlModifier);
+        QCOMPARE(window->property("reading").toBool(), true);
+        press(window.data(), Qt::Key_E, Qt::ControlModifier);
+        QCOMPARE(window->property("reading").toBool(), false);
+
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("xyz") + text);
+        QVERIFY(editor->property("canUndo").toBool());
+        QVERIFY(QMetaObject::invokeMethod(editor, "undo"));
+        QCOMPARE(editor->property("text").toString(), text);
+    }
+
+    void listsCtrlEAmongTheShortcuts() {
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("shortcutsDialog"));
+        QVERIFY(dialog);
+        bool listed = false;
+        for (QObject *child : dialog->findChildren<QObject *>()) {
+            if (child->property("text").toString().contains(QStringLiteral("Ctrl+E  Reading / Editing")))
+                listed = true;
+        }
+        QVERIFY(listed);
+    }
+
+    static QString printedSample() {
+        return QStringLiteral(
+            "---\ntype: plan\n---\n# Printed\n\n<task>\n\nSome **bold** prose.\n\n"
+            "| Name | Count |\n|---|--:|\n| a | 1 |\n\n```python\nx = 1\n```\n</task>\n");
+    }
+
+    // Paper is printed light whatever the theme, through the reading renderer.
+    void buildsThePrintedPageAsTheReadingViewInLightColours() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("printed.md")),
+                                       printedSample());
+        Backend backend;
+        backend.setDarkMode(true);
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        QTextDocument printed;
+        backend.buildPrintDocument(&printed, QSizeF(600, 900));
+
+        const QString shown = printed.toPlainText();
+        QVERIFY(!shown.contains(QStringLiteral("type: plan")));
+        QVERIFY(!shown.contains(QStringLiteral("task")));
+        QVERIFY(!shown.contains(QStringLiteral("**")));
+        const QTextBlock prose = findRenderedBlock(printed, QStringLiteral("Some bold prose."));
+        QCOMPARE(prose.begin().fragment().charFormat().foreground().color(), QColor(QStringLiteral("#222324")));
+
+        QTextTable *table = QTextCursor(findRenderedBlock(printed, QStringLiteral("Name"))).currentTable();
+        QVERIFY(table);
+        const QColor shade = table->cellAt(0, 0).format().background().color();
+        QVERIFY(shade.isValid());
+        QVERIFY(shade.lightness() > 200);
+        QCOMPARE(table->cellAt(1, 0).format().background().style(), Qt::NoBrush);
+
+        const QTextBlock code = findRenderedBlock(printed, QStringLiteral("x = 1"));
+        QCOMPARE(QTextCursor(code).currentFrame()->frameFormat().background().color(), shade);
+        QCOMPARE(code.previous().text(), QStringLiteral("python"));
+    }
+
+    void printsThePageToAPdfFile() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("printed.md")),
+                                       printedSample());
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        const QString pdf = directory.filePath(QStringLiteral("printed.pdf"));
+        printer.setOutputFileName(pdf);
+        backend.printTo(&printer);
+
+        QFile written(pdf);
+        QVERIFY(written.open(QIODevice::ReadOnly));
+        QVERIFY(written.size() > 1000);
+        QVERIFY(written.read(4) == QByteArrayLiteral("%PDF"));
+    }
+
+    // Reading, switching, finding and closing never write the file.
+    void leavesAFileUnchangedAfterReadingSwitchingAndFinding() {
+        QTemporaryDir directory;
+        const QString text = printedSample() + QStringLiteral(
+            "\n| A | B |\n|---|---|\n| x<br>y | z |\n\nTrailing   spaces   \n\n\n");
+        const QString path = writeFile(directory.filePath(QStringLiteral("kept.md")), text);
+        QFile before(path);
+        QVERIFY(before.open(QIODevice::ReadOnly));
+        const QByteArray bytes = before.readAll();
+        before.close();
+
+        {
+            Backend backend;
+            QQmlEngine engine;
+            QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+            QVERIFY(window);
+            backend.open(QUrl::fromLocalFile(path));
+            press(window.data(), Qt::Key_E, Qt::ControlModifier);
+            press(window.data(), Qt::Key_E, Qt::ControlModifier);
+            press(window.data(), Qt::Key_F, Qt::ControlModifier);
+            window->findChild<QObject *>(QStringLiteral("searchField"))
+                ->setProperty("text", QStringLiteral("bold"));
+            press(window.data(), Qt::Key_E, Qt::ControlModifier);
+            press(window.data(), Qt::Key_E, Qt::ControlModifier);
+            QCOMPARE(backend.property("modified").toBool(), false);
+            QVERIFY(QMetaObject::invokeMethod(window.data(), "close"));
+        }
+
+        QFile after(path);
+        QVERIFY(after.open(QIODevice::ReadOnly));
+        QCOMPARE(after.readAll(), bytes);
     }
 
     void refitsCodeWhenTheReadingViewNarrows() {

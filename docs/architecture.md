@@ -113,9 +113,12 @@ the renderer reports where each table's header row lies for the window to shade
 behind the page. Images load only from this machine; any other image shows its
 alternative text. It also lists the rendered headings, so each outline entry can be
 matched to its heading in the rendered copy, in order, and the outline, the jump and
-the reading mark work there. It is fed text and a style and fills the document it is
-given, which belongs to the view showing it; it holds nothing the text does not
-already say, and nothing it builds is ever written anywhere.
+the reading mark work there. Printing uses it too, with a light style whatever the
+theme and the page's width as the column; paper, unlike the reading view, draws a
+table cell's own background, so there the header cells are shaded in the document.
+It is fed text and a style and fills the document it is given, which belongs to the
+view showing it; it holds nothing the text does not already say, and nothing it
+builds is ever written anywhere.
 
 **System theme.** Reads the desktop's dark-mode and text-size settings through the
 desktop portal and reports changes as they happen. The core receives them and passes
@@ -148,15 +151,26 @@ the text, and Enter jumps while keeping focus in the outline. A picked heading s
 marked, even one too near the end to reach the top, until the view next moves.
 
 **Switching views.** Ctrl+E swaps the reading view and the editor. The window notes
-the heading at the top of the one being left and brings the same heading, found by
-its place in the outline, to the top of the other. Within a section the place is
-kept as closely as the two layouts allow. The two views sit in one scrolling area,
-one hidden while the other shows, so both keep Leaf's scrolling feel. The editor is
-hidden, not destroyed, while reading, so its undo history and cursor survive. The
-window asks the core for a fresh render whenever it shows the reading view, and when
+the place in the one being left -- the outline entry marked at the top, or the top of
+the file above the first heading, and how far through that section the view is, as a
+share of its length -- and brings the other to the same section and share, marking
+it. A section the reading view has no heading for gives way to the nearest one
+before it. Entering the editor puts its cursor at the start of the line at the top
+of the view. The same place is kept when the page is rebuilt while shown. The two
+views sit in one scrolling area, one hidden while the other shows, so both keep
+Leaf's scrolling feel. The editor is hidden, not destroyed, while reading, so its
+undo history and cursor survive. The window asks the core for a fresh render whenever it shows the reading view, and when
 the theme, the mode, the text size or the column's width changes while it is shown;
 the render is fitted to the column, so a resize rebuilds it once the width settles.
 The core applies the restyle as one change, so the view lays the page out once.
+
+**Finding.** The find bar searches the view shown, ignoring case. In the editor it
+matches the text, marks and all, and highlights through the highlighter; on the page
+the core searches the rendered copy, so matches are the text as shown, and the
+window draws boxes over the matches in and near the view, leaving the editor alone.
+The bar keeps its query across Ctrl+E and finds again from the top of the view, so
+the switch keeps its place. Replace works on the editable text only, so Ctrl+H
+opens it in the editor.
 
 **Editing.** A keystroke changes the editor's document. The highlighter restyles the
 changed lines; the core marks the document modified, schedules a recovery snapshot,
