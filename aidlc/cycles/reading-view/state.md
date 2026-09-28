@@ -10,20 +10,21 @@ mode: run
 
 ## Where we are
 
-Phase 1, slices 1-1 and 1-2 done. 1-3 tables-and-code not yet detailed. The owner
-chose to keep the plan's order (1-3 before 2-1), 2026-09-27.
+Phase 2, slice 2-1 closed and docs/architecture.md reconciled. 2-2 switch-in-place not
+yet detailed. 1-3 and 2-1 are not committed yet.
 
 ## Next
 
-Detail and execute slice 1-3 tables-and-code: `execute-slice` on `reading-view`.
-Effort high. Before detailing, ask the owner the open look question in 1-2's notes
-(restyle toward the T3 Code mock-up, or keep today's style and fix the bullets),
-since it decides how tables and code boxes look.
+Detail and execute slice 2-2 switch-in-place: `execute-slice` on `reading-view`.
+Effort medium (the phase default), lower than 2-1's high, so the owner may switch
+model first.
 
 ## Done
 
 - 2026-09-27 1-1 reading-renderer
 - 2026-09-27 1-2 reading-view-window
+- 2026-09-27 1-3 tables-and-code
+- 2026-09-27 2-1 outline-in-reading
 
 ## For a cold session
 
@@ -34,21 +35,18 @@ since it decides how tables and code boxes look.
   in both views and switching keeps the place; stat cards unchanged; editing view
   stays as today; Ctrl+F finds in the reading view, replace only in editing; links
   clickable; theme followed; printing prints the reading view. Approach 1 (Qt's
-  importer, restyled); drawing blocks by hand stays open for anything that falls short.
-- One scope change so far: the display copy also closes void HTML tags such as
-  `<br>` (`scope-changes.md`), because Qt drops the rest of the file otherwise.
-- Prose is set in iA Writer Duo S, not the Quattro S the plan assumed: the installed
-  Quattro files are mislabelled and Qt draws its Bold face for regular text. The owner
-  has not seen it on screen yet; show them in 1-2.
-- For 1-2, read 1-1's notes: the renderer fills the view's own document, the caller
-  chooses colours per mode, and still to check on screen is drawing time in the real
-  window (render plus layout of 6,840 lines was 78 ms offscreen).
-- For the planner notes still standing: find in the reading view needs its own
-  highlighting (today's goes through the editor's highlighter); printing today
-  imports the raw text and must go through the renderer (2-4).
-- A throwaway harness in `/tmp/mdreal` renders a file to a PNG with the renderer
-  (`./p <file> <out.png> <max height> light|dark`); rebuild it with qmake6 if /tmp
-  was cleared. It is not part of the repo.
-- A Leaf window launched from a session may take keyboard focus from the owner's
-  window; capture straight after launch, close at once, and send keys only when Leaf
-  is the active window.
+  importer, restyled).
+- The look: the owner chose on 2026-09-27 to keep today's style (iA Writer Duo S,
+  today's sizes) rather than the T3 Code look, and to fix the bullets; 1-3 did so.
+- Two scope changes (`scope-changes.md`): the display copy closes void HTML tags such
+  as `<br>`; a file opens with the keyboard focus in the outline.
+- Still stopgaps until 2-2 and 2-3: Ctrl+F and Ctrl+H switch to editing first, and
+  Ctrl+E keeps only the scroll share. The outline, Ctrl+J and the mark work in the
+  reading view since 2-1.
+- Read 2-1's notes before 2-2: `headingY(index)` is the one way to ask where a
+  heading is in the view shown. Read 1-3's notes too: block numbers in the rendered
+  document include the empty blocks frames add; the code label is document text that
+  find (2-3) will match; the header shade is drawn by the window, so printing (2-4)
+  must draw it itself.
+- Judge the look only from the real window, never from the offscreen harness in
+  `/tmp/mdreal`. AGENTS.md says how to capture it headless, light theme included.

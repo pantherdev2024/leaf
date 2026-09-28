@@ -22,3 +22,18 @@ Append-only. Newest last.
 - Agreed: yes, by the owner
 - Applied to the plan: yes (no plan line changed; the spec and architecture were
   updated)
+
+## 2026-09-27 -- A file opens with the focus in the outline
+
+- Discovered in: after 2-1, asked by the owner
+- What changed: when a file is opened, reloaded or recovered, the keyboard focus goes
+  to the outline with the first (or marked) entry selected, as Ctrl+J does, instead
+  of to the page. A file with no headings leaves the focus on the page. A new empty
+  window still starts in the editor.
+- Why: the owner wants to step through the headings with the arrows and Enter as soon
+  as a file opens.
+- Affects: spec *Opening*; design *Jump to a section*; architecture *Reading and
+  jumping*. Done alongside 2-1, with a test. No plan line changes.
+- Agreed: yes, by the owner
+- Applied to the plan: yes (no plan line changed; the spec, design and architecture
+  were updated)

@@ -32,7 +32,6 @@
 #include <algorithm>
 
 #include "markdownhighlighter.h"
-#include "readingrenderer.h"
 #include "structurescan.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
@@ -443,26 +442,82 @@ void Backend::attachReadingDocument(QObject *textDocument) {
     renderReading();
 }
 
-void Backend::renderReading() {
-    if (!m_readingDocument || !m_document)
-        return;
+void Backend::renderReadingAtWidth(qreal columnWidth) {
+    m_readingColumnWidth = columnWidth;
+    renderReading();
+}
 
+ReadingRenderer::Style Backend::readingStyle() const {
     const QColor background(m_themeBackground);
     const QColor foreground(m_themeForeground);
-    // A faint wash of the text colour over the page, visible in either mode.
-    const qreal wash = m_darkMode ? 0.12 : 0.08;
+    // A share of the way from the page's colour to the text's.
+    const auto towardText = [&](qreal share) {
+        return QColor::fromRgbF(
+            background.redF() + (foreground.redF() - background.redF()) * share,
+            background.greenF() + (foreground.greenF() - background.greenF()) * share,
+            background.blueF() + (foreground.blueF() - background.blueF()) * share);
+    };
     ReadingRenderer::Style style;
     style.text = foreground;
     style.accent = QColor(m_themeAccent);
-    style.shade = QColor::fromRgbF(
-        background.redF() + (foreground.redF() - background.redF()) * wash,
-        background.greenF() + (foreground.greenF() - background.greenF()) * wash,
-        background.blueF() + (foreground.blueF() - background.blueF()) * wash);
+    // A faint wash of the text colour over the page, visible in either mode.
+    style.shade = towardText(m_darkMode ? 0.12 : 0.08);
+    style.line = towardText(m_darkMode ? 0.3 : 0.25);
+    style.dim = towardText(0.55);
     style.bodyPixelSize = qMax<qreal>(1, qRound(readingBodyPixelSize * m_textScale));
     style.proseFamily = QStringLiteral("iA Writer Duo S");
     style.codeFamily = QStringLiteral("iA Writer Mono S");
     style.fileUrl = m_fileUrl;
-    ReadingRenderer::render(m_readingDocument, currentDocumentText(), style);
+    style.columnWidth = m_readingColumnWidth;
+    return style;
+}
+
+void Backend::renderReading() {
+    if (!m_readingDocument || !m_document)
+        return;
+    ReadingRenderer::render(m_readingDocument, currentDocumentText(), readingStyle());
+    matchReadingHeadings();
+}
+
+// Run after a render and after the outline changes: a reload renders the page
+// before the recount has listed the new outline.
+void Backend::matchReadingHeadings() {
+    QVariantList positions;
+    if (m_readingDocument) {
+        QList<ReadingRenderer::OutlineEntry> entries;
+        for (const QVariant &entry : std::as_const(m_outline)) {
+            const QVariantMap heading = entry.toMap();
+            entries.append({heading.value(QStringLiteral("level")).toInt(),
+                            heading.value(QStringLiteral("title")).toString()});
+        }
+        const QList<ReadingRenderer::RenderedHeading> rendered
+            = ReadingRenderer::headings(m_readingDocument);
+        for (const int match : ReadingRenderer::matchHeadings(entries, rendered)) {
+            positions.append(match < 0 ? -1
+                                       : m_readingDocument->findBlockByNumber(rendered.at(match).block)
+                                             .position());
+        }
+    }
+    if (positions != m_readingHeadingPositions) {
+        m_readingHeadingPositions = positions;
+        emit readingHeadingPositionsChanged();
+    }
+}
+
+QVariantList Backend::readingHeaderRows() const {
+    QVariantList rows;
+    if (!m_readingDocument)
+        return rows;
+    for (const QRectF &row : ReadingRenderer::headerRows(m_readingDocument)) {
+        rows.append(QVariantMap{{QStringLiteral("x"), row.x()}, {QStringLiteral("y"), row.y()},
+                                {QStringLiteral("width"), row.width()},
+                                {QStringLiteral("height"), row.height()}});
+    }
+    return rows;
+}
+
+QColor Backend::readingShade() const {
+    return readingStyle().shade;
 }
 
 void Backend::loadDocumentText(const QString &text) {
@@ -825,6 +880,7 @@ void Backend::recount(const QString &text) {
     }
     if (outline != m_outline) {
         m_outline = outline;
+        matchReadingHeadings();
         emit outlineChanged();
     }
 }

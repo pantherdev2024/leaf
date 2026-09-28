@@ -77,11 +77,12 @@ disk, or recovering after a crash, also starts from the first line. They read by
 scrolling, and the outline follows, marking the section they are in. Find works in
 the reading view; links there can be clicked.
 
-**Jump to a section.** Without touching the mouse, the owner presses Ctrl+J to move
-into the outline, steps through the headings with the arrow keys, and presses Enter.
-The text jumps so that heading is at the top, and the outline keeps focus so they can
-jump again. Ctrl+J, or Escape, takes them back to the text. Clicking an entry jumps
-and puts them in the text.
+**Jump to a section.** Without touching the mouse, the owner steps through the
+headings with the arrow keys and presses Enter. A file just opened starts with the
+keyboard in the outline; otherwise Ctrl+J moves them into it. The text jumps so
+that heading is at the top, and the outline keeps focus so they can jump again.
+Ctrl+J, or Escape, takes them back to the text. Clicking an entry jumps and puts them
+in the text.
 
 **Make a small edit.** The owner presses Ctrl+E, and the reading view gives way to
 the editing view at the same place. They type, as in Omawrite, and save; Ctrl+E takes

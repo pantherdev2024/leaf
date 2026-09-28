@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QObject>
 #include <QPointer>
 #include <QByteArray>
@@ -9,6 +10,8 @@
 #include <QUrl>
 #include <QVariantList>
 #include <memory>
+
+#include "readingrenderer.h"
 
 class MarkdownHighlighter;
 class QTextDocument;
@@ -28,6 +31,10 @@ class Backend : public QObject {
     // Each entry: level, title (as the outline shows it) and position (of the
     // heading line's first character).
     Q_PROPERTY(QVariantList outline READ outline NOTIFY outlineChanged)
+    // For each outline entry, where its heading starts in the reading view's
+    // document, or -1 when the page shows no heading to match it.
+    Q_PROPERTY(QVariantList readingHeadingPositions READ readingHeadingPositions
+                   NOTIFY readingHeadingPositionsChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
     Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
@@ -51,6 +58,7 @@ public:
     int tokenEstimate() const { return m_tokenEstimate; }
     int sectionCount() const { return m_sectionCount; }
     QVariantList outline() const { return m_outline; }
+    QVariantList readingHeadingPositions() const { return m_readingHeadingPositions; }
     bool darkMode() const { return m_darkMode; }
     void setDarkMode(bool darkMode);
     qreal textScale() const { return m_textScale; }
@@ -69,7 +77,14 @@ public:
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     // The reading view's own document, which renderReading fills from the text.
     Q_INVOKABLE void attachReadingDocument(QObject *textDocument);
-    Q_INVOKABLE void renderReading();
+    void renderReading();
+    // Renders at the reader's column width, which code blocks are fitted to.
+    Q_INVOKABLE void renderReadingAtWidth(qreal columnWidth);
+    // Where the reading view's table header rows sit, each as x, y, width and
+    // height, and the shade they are drawn in: the text view draws no cell
+    // backgrounds, so the window draws them behind it.
+    Q_INVOKABLE QVariantList readingHeaderRows() const;
+    Q_INVOKABLE QColor readingShade() const;
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();
@@ -97,6 +112,7 @@ signals:
     void statusChanged();
     void statsChanged();
     void outlineChanged();
+    void readingHeadingPositionsChanged();
     void darkModeChanged();
     void textScaleChanged();
     void themeColorsChanged();
@@ -108,6 +124,8 @@ signals:
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
+    ReadingRenderer::Style readingStyle() const;
+    void matchReadingHeadings();
     void loadDocumentText(const QString &text);
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);
@@ -136,6 +154,7 @@ private:
     int m_tokenEstimate = 0;
     int m_sectionCount = 0;
     QVariantList m_outline;
+    QVariantList m_readingHeadingPositions;
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
     bool m_loading = false;
@@ -149,6 +168,7 @@ private:
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;
     QPointer<QTextDocument> m_readingDocument;
+    qreal m_readingColumnWidth = 0;
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;
     QString m_lastDocumentText;

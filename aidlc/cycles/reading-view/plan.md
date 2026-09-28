@@ -54,7 +54,7 @@ reads.
   the reading view switch to the editing view and work there as today, so nothing
   breaks between slices. Done when: in Leaf, in both themes, those behaviours are seen on
   screen and the suite covers opening, switching and rebuilding. Depends on: 1-1.
-- [ ] 1-3 tables-and-code -- Draw tables as grids with a shaded header row, the file's
+- [x] 1-3 tables-and-code -- Draw tables as grids with a shaded header row, the file's
   column alignment, wrapping cells and empty cells for short rows, and code blocks as
   shaded monospaced bands with kept spacing, wrapped lines and a small language
   label. Done when: tests check borders, header shading, alignment and code shading
@@ -68,7 +68,7 @@ view. Done when: the spec's Verification holds in full. Effort: medium.
 Leaves behind: one way to ask for a heading's place in whichever view is shown, used
 by the jump, the mark, switching and find.
 
-- [ ] 2-1 outline-in-reading -- Match outline entries to rendered headings in order by
+- [x] 2-1 outline-in-reading -- Match outline entries to rendered headings in order by
   level and plain text, and make clicking, Ctrl+J with the arrows, Enter and Escape,
   and the reading mark work in the reading view; unmatched entries jump nowhere and
   are never marked. Done when: tests cover matching, including a heading with marks

@@ -71,6 +71,14 @@ do not act past it.
   (`documentLayout()`) and the new highlighter's queued first pass has run
   (`processEvents()`). QML list and Repeater delegates are not found by `findChild`;
   walk the window's visual items instead.
+- Qt Quick's text view draws a `QTextFrame`'s background but not a block's or a table
+  cell's, and it crashes on a border set on any frame that is not a table. The
+  reading view's boxes are borderless frames; see docs/architecture.md.
+- To see the reading view without taking the owner's focus, use a temporary test that
+  loads the window, resizes it to 1898x1032, opens a file and saves `grabWindow()`;
+  remove it afterwards. Colours come from
+  `~/.local/state/omarchy/current/theme/colors.toml`, so for the light theme run it
+  with `HOME` pointing at a folder holding a light one.
 - `xdg-open file.md` opens Neovim, not Leaf: it guesses types from contents. Test the
   Markdown default with `gio open`, which goes by the file name, as the file manager
   does.

@@ -103,14 +103,19 @@ typing. It changes how text looks, never what the text is.
 display copy with the lines Qt's importer misreads left out (front matter, and lines
 that are only an XML-like tag such as `<task>`) and unclosed void HTML tags such as
 `<br>` closed, imports it with Qt's Markdown support, then walks the result and
-restyles it -- spacing, heading sizes, colours from the theme, table borders and
-header shading, code shading, the language label. Images load only from this
-machine; any other image shows its alternative text. It also lists the rendered
-headings, so each outline entry can be matched to its heading in the rendered copy,
-in order, and the outline, the jump and the reading mark work there. It is fed text
-and a style and fills the document it is given, which belongs to the view showing
-it; it holds nothing the text does not already say, and nothing it builds is ever
-written anywhere.
+restyles it -- spacing, heading sizes, colours from the theme, table borders, bold
+and aligned header rows, list bullets, code blocks and quotes in shaded boxes with the
+code's language as a small label on the box's first line. A code block a little wider
+than the column is set just small enough to fit, so a diagram drawn in text keeps its
+shape; one that could only fit far smaller wraps instead. Qt Quick's text view draws a
+frame's background but not a block's or a table cell's, so the boxes are frames, and
+the renderer reports where each table's header row lies for the window to shade
+behind the page. Images load only from this machine; any other image shows its
+alternative text. It also lists the rendered headings, so each outline entry can be
+matched to its heading in the rendered copy, in order, and the outline, the jump and
+the reading mark work there. It is fed text and a style and fills the document it is
+given, which belongs to the view showing it; it holds nothing the text does not
+already say, and nothing it builds is ever written anywhere.
 
 **System theme.** Reads the desktop's dark-mode and text-size settings through the
 desktop portal and reports changes as they happen. The core receives them and passes
@@ -131,10 +136,14 @@ left at the end of the new text and the view follows it there.
 
 **Reading and jumping.** Scrolling is the window's alone. As the view moves, the
 window works out which heading is at the top and marks it in the outline. Picking an
-outline entry scrolls the editor so that heading's position is at the top of the view.
-Positions come from the last scan, so during a pause in typing the outline can be a
-moment behind the text. Nothing here touches the core or the file. Ctrl+J moves focus
-between the text and the outline; there, the arrows move a selection without moving
+outline entry scrolls that heading to the top of the view. Both ask one question --
+where an entry's heading is in the view shown: in the editor, at the position the
+last scan gave it; in the reading view, at the rendered heading the core matched it
+to, which it re-matches after every render and every new outline. An entry with no
+matched heading is never marked and jumps nowhere. During a pause in typing the
+outline can be a moment behind the text. While reading, the hidden editor's cursor
+does not move the view. Nothing here touches the core or the file. A file opens with
+the focus in the outline, and Ctrl+J moves focus between the text and the outline; there, the arrows move a selection without moving
 the text, and Enter jumps while keeping focus in the outline. A picked heading stays
 marked, even one too near the end to reach the top, until the view next moves.
 
@@ -145,8 +154,9 @@ kept as closely as the two layouts allow. The two views sit in one scrolling are
 one hidden while the other shows, so both keep Leaf's scrolling feel. The editor is
 hidden, not destroyed, while reading, so its undo history and cursor survive. The
 window asks the core for a fresh render whenever it shows the reading view, and when
-the theme, the mode or the text size changes while it is shown. The core applies the
-restyle as one change, so the view lays the page out once.
+the theme, the mode, the text size or the column's width changes while it is shown;
+the render is fitted to the column, so a resize rebuilds it once the width settles.
+The core applies the restyle as one change, so the view lays the page out once.
 
 **Editing.** A keystroke changes the editor's document. The highlighter restyles the
 changed lines; the core marks the document modified, schedules a recovery snapshot,

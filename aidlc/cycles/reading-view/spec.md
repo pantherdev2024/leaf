@@ -47,6 +47,9 @@ shown, and rebuilt or thrown away; nothing typed or clicked there changes the te
 - Opening a file -- from the file manager, a terminal or inside Leaf -- shows it in
   the reading view, scrolled to its start. So do reloading after an outside change and
   recovering after a crash.
+- The keyboard focus then starts in the outline, on the first entry (or the marked
+  one), as after Ctrl+J; a file with no headings leaves it on the page (scope change,
+  2026-09-27).
 - The stat cards and the outline are as they are today: counted and listed from the
   file's text.
 - A new, empty window (Ctrl+N, or Leaf started with no file) opens in the editing

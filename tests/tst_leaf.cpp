@@ -1,4 +1,7 @@
 #include <QtTest>
+#include <QAbstractTextDocumentLayout>
+#include <QFontMetricsF>
+#include <QTextFrame>
 #include <QSignalSpy>
 #include <QFont>
 #include <QJsonDocument>
@@ -220,6 +223,7 @@ private slots:
         QScopedPointer<QObject> window(createWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
         assertAtFirstLine(window.data());
 
         const int position = text.indexOf(QStringLiteral("## Section 4"));
@@ -245,6 +249,7 @@ private slots:
         QScopedPointer<QObject> window(createWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
         assertAtFirstLine(window.data());
 
         // The entries in order: "Headed", then "Section 1" onwards.
@@ -272,6 +277,7 @@ private slots:
         QScopedPointer<QObject> window(createWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
         assertAtFirstLine(window.data());
 
         const int position = text.indexOf(QStringLiteral("## Last"));
@@ -364,6 +370,7 @@ private slots:
         QScopedPointer<QObject> window(createWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
         assertAtFirstLine(window.data());
         QVERIFY(QMetaObject::invokeMethod(window.data(), "jumpToHeading", Q_ARG(QVariant, 9)));
         QCOMPARE(window->property("markedHeading").toInt(), 9);
@@ -417,6 +424,7 @@ private slots:
         QScopedPointer<QObject> window(createActiveWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
         assertAtFirstLine(window.data());
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
@@ -464,6 +472,7 @@ private slots:
         QScopedPointer<QObject> window(createActiveWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
         assertAtFirstLine(window.data());
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
@@ -493,6 +502,7 @@ private slots:
         QScopedPointer<QObject> window(createActiveWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
         QCOMPARE(window->property("markedHeading").toInt(), -1);
         QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
 
@@ -543,6 +553,9 @@ private slots:
         QVERIFY(reader->property("activeFocus").toBool());
 
         backend.open(QUrl::fromLocalFile(headed));
+        // The file opens with the focus in its outline; back to the page first.
+        press(window.data(), Qt::Key_Escape);
+        QVERIFY(reader->property("activeFocus").toBool());
         QObject *dialog = window->findChild<QObject *>(QStringLiteral("shortcutsDialog"));
         QVERIFY(dialog);
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
@@ -555,6 +568,30 @@ private slots:
         QTRY_VERIFY(!dialog->property("visible").toBool());
         press(window.data(), Qt::Key_J, Qt::ControlModifier);
         QTRY_VERIFY(list->property("activeFocus").toBool());
+    }
+
+    void opensAFileWithTheFocusInTheOutline() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                       headedDocument());
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+
+        backend.open(QUrl::fromLocalFile(path));
+
+        QTRY_VERIFY(list->property("activeFocus").toBool());
+        QCOMPARE(list->property("currentIndex").toInt(), 0);
+        QCOMPARE(window->property("reading").toBool(), true);
+
+        // The arrows and Enter move through the page straight away.
+        waitForPageToSettle(window.data());
+        press(window.data(), Qt::Key_Down);
+        press(window.data(), Qt::Key_Return);
+        QCOMPARE(window->property("markedHeading").toInt(), 1);
+        QVERIFY(list->property("activeFocus").toBool());
     }
 
     void leavesAnOutlineThatEmptiesForTheText() {
@@ -572,10 +609,9 @@ private slots:
         QObject *reader = window->findChild<QObject *>(QStringLiteral("readingView"));
         QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
         backend.open(QUrl::fromLocalFile(headed));
-        press(window.data(), Qt::Key_J, Qt::ControlModifier);
-        QVERIFY(list->property("activeFocus").toBool());
+        QTRY_VERIFY(list->property("activeFocus").toBool());
 
-        // The new file opens in the reading view, which takes the focus back.
+        // A new file with no headings leaves the page the focus.
         backend.open(QUrl::fromLocalFile(plain));
 
         QTRY_VERIFY(reader->property("activeFocus").toBool());
@@ -592,6 +628,7 @@ private slots:
         QScopedPointer<QObject> window(createWindow(backend, engine));
         QVERIFY(window);
         backend.open(QUrl::fromLocalFile(path));
+        showEditingView(window.data());
 
         QCOMPARE(window->property("markedHeading").toInt(), -1);
     }
@@ -1251,19 +1288,175 @@ private slots:
                  QStringLiteral("Use bold and code"));
     }
 
-    void spacesACodeBlockFromTheProseButNotBetweenItsLines() {
+    // Outline entries come from the text and are matched to the page's headings
+    // in order: marks in a title are gone on both sides, a heading the outline
+    // does not list is passed over, and one the page shows differently is left
+    // unmatched without upsetting the rest.
+    void matchesOutlineEntriesToRenderedHeadingsInOrder() {
+        const QString text = QStringLiteral(
+            "# One\n\n## Use **bold**  and `code`\n\nUnder\n===\n\n## Notes\n\n"
+            "# A &amp; B\n\n## Notes\n");
+        QTextDocument document;
+        ReadingRenderer::render(&document, text, readingStyle());
+
+        QList<ReadingRenderer::OutlineEntry> outline;
+        for (const StructureScan::Heading &heading : StructureScan::scan(text).headings)
+            outline.append({heading.level, Backend::outlineTitle(heading.text)});
+        QCOMPARE(outline.size(), 5);
+
+        const QList<ReadingRenderer::RenderedHeading> rendered = ReadingRenderer::headings(&document);
+        QCOMPARE(rendered.at(4).text, QStringLiteral("A & B"));
+        QCOMPARE(ReadingRenderer::matchHeadings(outline, rendered), (QList<int>{0, 1, 3, -1, 5}));
+    }
+
+    void setsACodeBlocksLinesInOneShadedBox() {
         QTextDocument document;
         ReadingRenderer::render(&document, QStringLiteral(
             "Before\n\n```\nfirst\nmiddle\nlast\n```\n\nAfter\n"), readingStyle());
-        const QTextBlockFormat first = findRenderedBlock(document, QStringLiteral("first")).blockFormat();
-        const QTextBlockFormat middle = findRenderedBlock(document, QStringLiteral("middle")).blockFormat();
-        const QTextBlockFormat last = findRenderedBlock(document, QStringLiteral("last")).blockFormat();
-        QVERIFY(first.topMargin() > 0);
-        QCOMPARE(first.bottomMargin(), 0.0);
-        QCOMPARE(middle.topMargin(), 0.0);
-        QCOMPARE(middle.bottomMargin(), 0.0);
-        QCOMPARE(last.topMargin(), 0.0);
-        QVERIFY(last.bottomMargin() > 0);
+        QTextFrame *box = QTextCursor(findRenderedBlock(document, QStringLiteral("first")))
+                              .currentFrame();
+        QVERIFY(box != document.rootFrame());
+        QCOMPARE(box->frameFormat().background().color(), readingStyle().shade);
+        QCOMPARE(QTextCursor(findRenderedBlock(document, QStringLiteral("last"))).currentFrame(), box);
+        QCOMPARE(QTextCursor(findRenderedBlock(document, QStringLiteral("After"))).currentFrame(),
+                 document.rootFrame());
+    }
+
+    void setsTwoCodeBlocksInARowInTwoBoxes() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "```python\none\n```\n\n```js\ntwo\n```\n"), readingStyle());
+        QTextFrame *first = QTextCursor(findRenderedBlock(document, QStringLiteral("one"))).currentFrame();
+        QTextFrame *second = QTextCursor(findRenderedBlock(document, QStringLiteral("two"))).currentFrame();
+        QVERIFY(first != document.rootFrame());
+        QVERIFY(second != document.rootFrame());
+        QVERIFY(first != second);
+    }
+
+    void labelsACodeBlockWithItsLanguage() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "```python\nx = 1\n```\n\n```\ny = 2\n```\n"), readingStyle());
+        const QTextBlock code = findRenderedBlock(document, QStringLiteral("x = 1"));
+        const QTextBlock label = code.previous();
+        QCOMPARE(label.text(), QStringLiteral("python"));
+        QCOMPARE(QTextCursor(label).currentFrame(), QTextCursor(code).currentFrame());
+        QCOMPARE(label.blockFormat().alignment() & Qt::AlignHorizontal_Mask, Qt::AlignRight);
+        QVERIFY(pixelSizesIn(label).first() < pixelSizesIn(code).first());
+        QCOMPARE(label.begin().fragment().charFormat().foreground().color(), readingStyle().dim);
+
+        const QTextBlock unlabelled = findRenderedBlock(document, QStringLiteral("y = 2"));
+        QCOMPARE(QTextCursor(unlabelled).currentFrame()->firstPosition(), unlabelled.position());
+    }
+
+    void wrapsLongCodeLines() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("```\nlong line\n```\n"), readingStyle());
+        QCOMPARE(findRenderedBlock(document, QStringLiteral("long line")).blockFormat()
+                     .nonBreakableLines(), false);
+    }
+
+    // A text diagram a little wider than the column is set smaller to keep its
+    // shape; long lines that could only fit far smaller wrap at the code size.
+    void fitsASlightlyWideCodeBlockToTheColumn() {
+        ReadingRenderer::Style style = readingStyle();
+        style.columnWidth = 700;
+        const QString diagram = QStringLiteral("+") + QString(78, QLatin1Char('-')) + QStringLiteral("+");
+        const QString prose = QString(200, QLatin1Char('x'));
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("```\n%1\n```\n\nText\n\n```\n%2\n```\n\n"
+                                                          "Text\n\n```\nshort\n```\n")
+                                               .arg(diagram, prose), style);
+
+        const int codeSize = pixelSizesIn(findRenderedBlock(document, QStringLiteral("short"))).first();
+        QCOMPARE(codeSize, qRound(17 * 0.88));
+        QCOMPARE(pixelSizesIn(findRenderedBlock(document, prose)).first(), codeSize);
+
+        const int fitted = pixelSizesIn(findRenderedBlock(document, diagram)).first();
+        QVERIFY2(fitted < codeSize, qPrintable(QString::number(fitted)));
+        QFont font(style.codeFamily);
+        font.setPixelSize(fitted);
+        QVERIFY(QFontMetricsF(font).horizontalAdvance(diagram) <= style.columnWidth);
+    }
+
+    void doesNotFitCodeWithoutAColumnWidth() {
+        const QString diagram = QStringLiteral("+") + QString(78, QLatin1Char('-')) + QStringLiteral("+");
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("```\n%1\n```\n").arg(diagram), readingStyle());
+        QCOMPARE(pixelSizesIn(findRenderedBlock(document, diagram)).first(), qRound(17 * 0.88));
+    }
+
+    void setsAQuoteInAShadedBox() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("Before\n\n> Quoted\n\nAfter\n"),
+                                readingStyle());
+        QTextFrame *box = QTextCursor(findRenderedBlock(document, QStringLiteral("Quoted")))
+                              .currentFrame();
+        QVERIFY(box != document.rootFrame());
+        QCOMPARE(box->frameFormat().background().color(), readingStyle().shade);
+        QCOMPARE(box->frameFormat().hasProperty(QTextFormat::FrameBorder), false);
+    }
+
+    void boldsAndAlignsATablesHeaderRow() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "| Name | Count |\n|:--|--:|\n| a | 1 |\n"), readingStyle());
+        const QTextBlock count = findRenderedBlock(document, QStringLiteral("Count"));
+        QCOMPARE(count.blockFormat().alignment() & Qt::AlignHorizontal_Mask, Qt::AlignRight);
+        QCOMPARE(count.begin().fragment().charFormat().fontWeight(), int(QFont::Bold));
+        QCOMPARE(findRenderedBlock(document, QStringLiteral("Name")).begin().fragment()
+                     .charFormat().fontWeight(), int(QFont::Bold));
+        QCOMPARE(findRenderedBlock(document, QStringLiteral("a")).begin().fragment()
+                     .charFormat().fontWeight(), int(QFont::Normal));
+        QTextTable *table = QTextCursor(count).currentTable();
+        QCOMPARE(table->format().borderBrush().color(), readingStyle().line);
+    }
+
+    void showsAShortRowsMissingCellsEmpty() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral(
+            "| A | B | C |\n|---|---|---|\n| one |\n"), readingStyle());
+        QTextTable *table = QTextCursor(findRenderedBlock(document, QStringLiteral("one"))).currentTable();
+        QCOMPARE(table->columns(), 3);
+        for (int column = 0; column < 3; ++column)
+            QCOMPARE(table->cellAt(1, column).columnSpan(), 1);
+        QCOMPARE(table->cellAt(1, 1).firstCursorPosition().block().text(), QString());
+        QCOMPARE(table->cellAt(1, 2).firstCursorPosition().block().text(), QString());
+    }
+
+    // The view draws no cell backgrounds, so the header's shade is placed by
+    // the window from where the renderer says the row is.
+    void findsWhereATablesHeaderRowIs() {
+        QTextDocument document;
+        document.setTextWidth(600);
+        ReadingRenderer::render(&document, QStringLiteral(
+            "Intro\n\n| Name | Notes |\n|---|---|\n| a | a longer note |\n\nAfter\n"), readingStyle());
+        const QList<QRectF> rows = ReadingRenderer::headerRows(&document);
+        QCOMPARE(rows.size(), 1);
+
+        QAbstractTextDocumentLayout *layout = document.documentLayout();
+        const QRectF name = layout->blockBoundingRect(findRenderedBlock(document, QStringLiteral("Name")));
+        const QRectF notes = layout->blockBoundingRect(findRenderedBlock(document, QStringLiteral("Notes")));
+        const QRectF body = layout->blockBoundingRect(findRenderedBlock(document, QStringLiteral("a")));
+        QVERIFY(rows.first().contains(name));
+        QVERIFY(rows.first().contains(notes));
+        QVERIFY(rows.first().bottom() <= body.top());
+        QVERIFY(rows.first().top() > layout->blockBoundingRect(
+                                         findRenderedBlock(document, QStringLiteral("Intro"))).bottom());
+    }
+
+    // A list's bullet is drawn in its block's character format: in the sans
+    // font, whose bullet is round; a number stays in the prose font.
+    void drawsBulletsRoundAndNumbersInTheProseFont() {
+        QTextDocument document;
+        ReadingRenderer::render(&document, QStringLiteral("- bullet\n\n1. number\n"), readingStyle());
+        const QTextCharFormat bullet = findRenderedBlock(document, QStringLiteral("bullet")).charFormat();
+        QCOMPARE(bullet.fontFamilies().toStringList(), QStringList{QStringLiteral("sans-serif")});
+        QVERIFY(bullet.intProperty(QTextFormat::FontPixelSize) >= 17);
+        QCOMPARE(bullet.foreground().color(), readingStyle().text);
+        const QTextCharFormat number = findRenderedBlock(document, QStringLiteral("number")).charFormat();
+        QCOMPARE(number.fontFamilies().toStringList(), QStringList{readingStyle().proseFamily});
+        QCOMPARE(number.intProperty(QTextFormat::FontPixelSize), 17);
     }
 
     // A view showing the document lays it out again on every change it hears of,
@@ -1275,7 +1468,9 @@ private slots:
         QSignalSpy changes(&document, &QTextDocument::contentsChange);
         QString text;
         for (int section = 0; section < 20; ++section)
-            text += QStringLiteral("## Part %1\n\nSome **prose** and `code`.\n\n").arg(section);
+            text += QStringLiteral("## Part %1\n\nSome **prose** and `code`.\n\n"
+                                   "- item\n\n| A | B |\n|---|---|\n| 1 |\n\n"
+                                   "```cpp\nint x;\n```\n\n> quote\n\n").arg(section);
 
         ReadingRenderer::render(&document, text, readingStyle());
 
@@ -1437,6 +1632,158 @@ private slots:
         QCOMPARE(readingBodyPixelSize(window.data()), 26);
     }
 
+    void jumpsToAHeadingInTheReadingView() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                       headedDocument());
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "jumpToHeading", Q_ARG(QVariant, 4)));
+
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        QCOMPARE(window->property("reading").toBool(), true);
+        QCOMPARE(window->property("markedHeading").toInt(), 4);
+        QVERIFY(readingHeadingTop(window.data(), backend, 4) > 0);
+        QVERIFY(qAbs(flick->property("contentY").toReal()
+                     - readingHeadingTop(window.data(), backend, 4)) <= 1);
+    }
+
+    void jumpsToAHeadingClickedInTheOutlineWhileReading() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                       headedDocument());
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+
+        QQuickItem *entry = nullptr;
+        QTRY_VERIFY((entry = outlineEntry(window.data(), QStringLiteral("Section 3"))));
+        const QPointF centre = entry->mapToScene(QPointF(entry->width() / 2, entry->height() / 2));
+        QTest::mouseClick(qobject_cast<QQuickWindow *>(window.data()), Qt::LeftButton, {},
+                          centre.toPoint());
+
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        QTRY_COMPARE(window->property("markedHeading").toInt(), 3);
+        QCOMPARE(window->property("reading").toBool(), true);
+        QVERIFY(qAbs(flick->property("contentY").toReal()
+                     - readingHeadingTop(window.data(), backend, 3)) <= 1);
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("readingView"))
+                    ->property("activeFocus").toBool());
+    }
+
+    void stepsThroughTheOutlineWithoutLeavingTheReadingView() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                       headedDocument());
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createActiveWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+        QObject *list = window->findChild<QObject *>(QStringLiteral("outlineList"));
+        QObject *reader = window->findChild<QObject *>(QStringLiteral("readingView"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        // The file opens with the focus in its outline; back to the page first.
+        press(window.data(), Qt::Key_Escape);
+        QVERIFY(reader->property("activeFocus").toBool());
+
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        QVERIFY(list->property("activeFocus").toBool());
+        QCOMPARE(window->property("reading").toBool(), true);
+        press(window.data(), Qt::Key_Down);
+        press(window.data(), Qt::Key_Down);
+        press(window.data(), Qt::Key_Return);
+
+        QVERIFY(list->property("activeFocus").toBool());
+        QCOMPARE(window->property("markedHeading").toInt(), 2);
+        QVERIFY(qAbs(flick->property("contentY").toReal()
+                     - readingHeadingTop(window.data(), backend, 2)) <= 1);
+
+        press(window.data(), Qt::Key_Escape);
+        QVERIFY(reader->property("activeFocus").toBool());
+        QCOMPARE(window->property("reading").toBool(), true);
+
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        press(window.data(), Qt::Key_J, Qt::ControlModifier);
+        QVERIFY(reader->property("activeFocus").toBool());
+        QCOMPARE(window->property("reading").toBool(), true);
+    }
+
+    void marksTheHeadingBeingReadInTheReadingView() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                       headedDocument());
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+        QTRY_COMPARE(window->property("markedHeading").toInt(), 0);
+
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+        const qreal sectionThree = readingHeadingTop(window.data(), backend, 3);
+        flick->setProperty("contentY", sectionThree);
+        QCOMPARE(window->property("markedHeading").toInt(), 3);
+        flick->setProperty("contentY", sectionThree - 10);
+        QCOMPARE(window->property("markedHeading").toInt(), 2);
+    }
+
+    // `A &amp; B` is shown as `A & B`, so its entry has no heading on the page.
+    void ignoresAnEntryWithNoHeadingInTheReadingView() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+            headedDocument() + QStringLiteral("## A &amp; B\nThe end.\n"));
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        backend.open(QUrl::fromLocalFile(path));
+        waitForPageToSettle(window.data());
+        QTRY_COMPARE(backend.readingHeadingPositions().size(), 10);
+        QCOMPARE(backend.readingHeadingPositions().at(9).toInt(), -1);
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "jumpToHeading", Q_ARG(QVariant, 9)));
+        QCOMPARE(flick->property("contentY").toReal(), 0.0);
+        QCOMPARE(window->property("markedHeading").toInt(), 0);
+
+        flick->setProperty("contentY", flick->property("contentHeight").toReal()
+                                           - flick->property("height").toReal());
+        QCOMPARE(window->property("markedHeading").toInt(), 8);
+    }
+
+    void refitsCodeWhenTheReadingViewNarrows() {
+        QTemporaryDir directory;
+        const QString line = QString(70, QLatin1Char('-'));
+        const QString path = writeFile(directory.filePath(QStringLiteral("code.md")),
+                                       QStringLiteral("```\n%1\n```\n").arg(line));
+
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        window->setProperty("width", 1400);
+        backend.open(QUrl::fromLocalFile(path));
+        const auto codeSize = [&window, &line] {
+            return findRenderedBlock(*readingDocument(window.data()), line).begin().fragment()
+                .charFormat().intProperty(QTextFormat::FontPixelSize);
+        };
+        QCOMPARE(codeSize(), qRound(17 * 0.88));
+
+        window->setProperty("width", 1024);
+        QTRY_VERIFY(codeSize() < qRound(17 * 0.88));
+    }
+
 private:
     static QTextDocument *readingDocument(QObject *window) {
         QObject *reader = window->findChild<QObject *>(QStringLiteral("readingView"));
@@ -1458,6 +1805,8 @@ private:
         style.text = QColor(QStringLiteral("#222222"));
         style.accent = QColor(QStringLiteral("#1144aa"));
         style.shade = QColor(QStringLiteral("#eeeeee"));
+        style.line = QColor(QStringLiteral("#bbbbbb"));
+        style.dim = QColor(QStringLiteral("#888888"));
         style.bodyPixelSize = 17;
         style.proseFamily = QStringLiteral("iA Writer Duo S");
         style.codeFamily = QStringLiteral("iA Writer Mono S");
@@ -1573,6 +1922,24 @@ private:
     }
 
     // Where a position's line starts, in the scrolled view's coordinates.
+    // The page is rebuilt once the reader's width settles after the window is
+    // laid out, which moves its headings.
+    static void waitForPageToSettle(QObject *window) {
+        QObject *settled = window->findChild<QObject *>(QStringLiteral("readerWidthSettled"));
+        QVERIFY(settled);
+        QTRY_VERIFY(!settled->property("running").toBool());
+    }
+
+    // Where outline entry `index`'s heading starts on the rendered page, in the
+    // scrolling area's coordinates.
+    static qreal readingHeadingTop(QObject *window, Backend &backend, int index) {
+        QObject *reader = window->findChild<QObject *>(QStringLiteral("readingView"));
+        QRectF line;
+        QMetaObject::invokeMethod(reader, "positionToRectangle", Q_RETURN_ARG(QRectF, line),
+                                  Q_ARG(int, backend.readingHeadingPositions().at(index).toInt()));
+        return reader->property("y").toReal() + line.y();
+    }
+
     static qreal lineTop(QObject *editor, int position) {
         QRectF line;
         QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, line),
@@ -1611,6 +1978,9 @@ private:
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QObject *flick = window->findChild<QObject *>(QStringLiteral("editorFlick"));
         editor->setProperty("cursorPosition", editor->property("length"));
+        // The editor's cursor moves only the editing view; the page is scrolled.
+        flick->setProperty("contentY", flick->property("contentHeight").toReal()
+                                           - flick->property("height").toReal());
         QTRY_VERIFY(flick->property("contentY").toReal() > 0);
     }
 

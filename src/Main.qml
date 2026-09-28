@@ -34,6 +34,8 @@ ApplicationWindow {
         Math.max(360, width - outlineWidth - Math.round(writerFontMetrics.averageCharacterWidth * 20)),
         editorFlick.width)
     property bool closeConfirmed: false
+    property var readingHeaderRows: []
+    property color readingShade: "transparent"
     property bool searchOpen: false
     property bool searchUpdating: false
     property var searchMatches: []
@@ -109,24 +111,34 @@ ApplicationWindow {
         return Math.max(1, Math.round(pixels * win.textScale));
     }
 
-    // Bring a heading's line to the top of the view, or as near as the end of the
-    // text allows, with the cursor at its start. The cursor moves first, so the
-    // scroll that follows the cursor does not pull the view off the heading. The
-    // entry is marked and held after the scroll, which would otherwise mark by
-    // the usual rule. Focus stays where it is: a click moves it to the text, Enter
-    // in the outline leaves it there.
-    function jumpToHeading(index) {
-        // Until the reading view has its own jump, the jump happens in the text.
-        // Focus stays in the outline if it is there, and leaves the hidden page.
+    // Where outline entry `index` starts in the view shown, in the scrolling
+    // area's coordinates; undefined when the reading view shows no heading
+    // matched to it.
+    function headingY(index) {
         if (reading) {
-            reading = false;
-            if (reader.activeFocus)
-                editor.forceActiveFocus();
+            var position = backend.readingHeadingPositions[index];
+            if (position === undefined || position < 0)
+                return undefined;
+            return reader.y + reader.positionToRectangle(position).y;
         }
-        var target = Math.min(backend.outline[index].position, editor.length);
-        editor.cursorPosition = target;
-        var line = editor.positionToRectangle(target);
-        editorFlick.scrollTo(editorFlick.clampContentY(editor.y + line.y));
+        return editor.y + editor.positionToRectangle(
+            Math.min(backend.outline[index].position, editor.length)).y;
+    }
+
+    // Bring a heading to the top of the view, or as near as the end of the page
+    // allows, and mark it; an entry the reading view shows no heading for does
+    // nothing. In the editing view the cursor moves to the heading first, so the
+    // scroll that follows the cursor does not pull the view off it. The entry is
+    // marked and held after the scroll, which would otherwise mark by the usual
+    // rule. Focus stays where it is: a click moves it to the text, Enter in the
+    // outline leaves it there.
+    function jumpToHeading(index) {
+        var y = headingY(index);
+        if (y === undefined)
+            return;
+        if (!reading)
+            editor.cursorPosition = Math.min(backend.outline[index].position, editor.length);
+        editorFlick.scrollTo(editorFlick.clampContentY(y));
         markedHeading = index;
         markHeld = true;
     }
@@ -134,18 +146,22 @@ ApplicationWindow {
     // The last heading whose line starts at or above the top of the view. Scrolled
     // to the very top, the text starts below the view's edge, so the first line
     // counts as at the top then. A pixel of slack covers the view's snapping.
-    // Headings only move down the text, so a binary search over their lines will do.
+    // Headings only move down the page, so a binary search will do; in the
+    // reading view it runs over the entries matched to a heading there.
     function headingAtTop() {
-        var outline = backend.outline;
+        var entries = [];
+        for (var i = 0; i < backend.outline.length; ++i) {
+            if (!reading || backend.readingHeadingPositions[i] >= 0)
+                entries.push(i);
+        }
         var readingLine = Math.max(editorFlick.contentY, editor.y) + 1;
         var found = -1;
         var low = 0;
-        var high = outline.length - 1;
+        var high = entries.length - 1;
         while (low <= high) {
             var middle = Math.floor((low + high) / 2);
-            var position = Math.min(outline[middle].position, editor.length);
-            if (editor.y + editor.positionToRectangle(position).y <= readingLine) {
-                found = middle;
+            if (headingY(entries[middle]) <= readingLine) {
+                found = entries[middle];
                 low = middle + 1;
             } else {
                 high = middle - 1;
@@ -154,11 +170,8 @@ ApplicationWindow {
         return found;
     }
 
-    // Nothing is marked while reading until the reading view has its own mark.
     function updateMark() {
-        if (reading)
-            markedHeading = -1;
-        else if (!markHeld)
+        if (!markHeld)
             markedHeading = headingAtTop();
     }
 
@@ -180,9 +193,21 @@ ApplicationWindow {
         (reading ? reader : editor).forceActiveFocus();
     }
 
+    // Into the outline with the marked entry selected, or the first when none is.
+    // With no headings there is nothing to select, and the text keeps the focus.
+    function focusOutline() {
+        if (backend.outline.length === 0) {
+            focusText();
+            return;
+        }
+        outlineList.currentIndex = Math.max(0, markedHeading);
+        outlineList.positionViewAtIndex(outlineList.currentIndex, ListView.Contain);
+        outlineList.forceActiveFocus();
+    }
+
     function showReading() {
         var share = scrollShare();
-        backend.renderReading();
+        renderPage();
         reading = true;
         updateMark();
         reader.forceActiveFocus();
@@ -198,12 +223,24 @@ ApplicationWindow {
         updateMark();
     }
 
-    // The page is built for one theme and size, so a change rebuilds it.
+    // The page is laid out at the reader's width, and the header rows' shade is
+    // drawn behind it once it is laid out.
+    function renderPage() {
+        backend.renderReadingAtWidth(reader.width);
+        Qt.callLater(showHeaderShades);
+    }
+
+    function showHeaderShades() {
+        readingShade = backend.readingShade();
+        readingHeaderRows = backend.readingHeaderRows();
+    }
+
+    // The page is built for one theme, size and width, so a change rebuilds it.
     function rerenderReading() {
         if (!reading)
             return;
         var share = scrollShare();
-        backend.renderReading();
+        renderPage();
         restoreScrollShare(share);
     }
 
@@ -374,11 +411,7 @@ ApplicationWindow {
                 win.focusText();
                 return;
             }
-            if (win.reading)
-                win.showEditing(true);
-            outlineList.currentIndex = Math.max(0, win.markedHeading);
-            outlineList.positionViewAtIndex(outlineList.currentIndex, ListView.Contain);
-            outlineList.forceActiveFocus();
+            win.focusOutline();
         }
     }
 
@@ -420,14 +453,16 @@ ApplicationWindow {
 
         // A freshly loaded document is read from its first line. Without this the
         // caret is left at the end of the new text and the view follows it there.
-        // It opens in the reading view, which takes the focus the text had.
+        // It opens in the reading view, and the focus the text or the outline had
+        // goes to the outline, so the arrows and Enter move through the page at
+        // once; the file's outline is already listed by now.
         function onDocumentLoaded() {
             editor.cursorPosition = 0;
-            backend.renderReading();
+            win.renderPage();
             win.reading = true;
             win.updateMark();
-            if (editor.activeFocus)
-                reader.forceActiveFocus();
+            if (editor.activeFocus || reader.activeFocus || outlineList.activeFocus)
+                win.focusOutline();
             editorFlick.scrollTo(0);
         }
 
@@ -866,6 +901,10 @@ ApplicationWindow {
             // Keep the editing caret within the viewport so writing past the
             // bottom edge scrolls the page along with the text.
             function ensureCursorVisible() {
+                // The editor is hidden while reading, and its cursor must not
+                // move the page.
+                if (win.reading)
+                    return;
                 var margin = win.editorFontPixelSize * 2;
                 var cursorTop = editor.y + editor.cursorRectangle.y;
                 var cursorBottom = cursorTop + editor.cursorRectangle.height;
@@ -1146,6 +1185,20 @@ ApplicationWindow {
                 }
             }
 
+            // The text view draws no table cell backgrounds, so the header rows'
+            // shade is drawn behind the page.
+            Repeater {
+                model: win.reading ? win.readingHeaderRows : []
+
+                Rectangle {
+                    x: reader.x + modelData.x
+                    y: reader.y + modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    color: win.readingShade
+                }
+            }
+
             // The rendered page. The backend fills its document from the text; it
             // is never edited, and nothing in it is written back.
             TextEdit {
@@ -1167,6 +1220,21 @@ ApplicationWindow {
                 renderType: editor.renderType
                 onLinkActivated: function(link) {
                     backend.openExternalUrl(link);
+                }
+                // Code blocks are fitted to the column, so a new width rebuilds
+                // the page, once the width has settled.
+                onWidthChanged: readerWidthSettled.restart()
+                // A new layout moves the header rows and the headings.
+                onContentHeightChanged: {
+                    Qt.callLater(win.showHeaderShades);
+                    Qt.callLater(win.updateMark);
+                }
+
+                Timer {
+                    id: readerWidthSettled
+                    objectName: "readerWidthSettled"
+                    interval: 150
+                    onTriggered: win.rerenderReading()
                 }
 
                 HoverHandler {
