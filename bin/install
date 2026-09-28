@@ -12,4 +12,15 @@ fi
 "$ROOT/bin/build"
 
 cd "$PKGBUILD_DIR"
-exec makepkg -fsi "$@"
+makepkg -fsi "$@"
+
+# Without an explicit default, Markdown goes to whichever installed app claims it,
+# so record Leaf in the user's own settings. A failure here leaves Leaf
+# installed; it can still be set as the default by hand.
+if xdg-mime default leaf.desktop text/markdown text/x-markdown \
+    && [ "$(xdg-mime query default text/markdown)" = "leaf.desktop" ]; then
+  echo "Leaf is now the default app for Markdown files."
+else
+  echo "Leaf is installed, but could not be made the default for Markdown files." >&2
+  echo "Set it by hand with: xdg-mime default leaf.desktop text/markdown text/x-markdown" >&2
+fi

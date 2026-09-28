@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    title: (backend.modified ? "* " : "") + backend.fileName + " - Leaf"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -25,19 +25,49 @@ ApplicationWindow {
     // `omarchy display text size` drives) anchored so its 12px default leaves
     // the app at the sizes it was designed around.
     readonly property real textScale: backend.textScale
-    readonly property int editorFontPixelSize: scaledSize(20)
+    readonly property int editorFontPixelSize: scaledSize(17)
+    readonly property int outlineWidth: scaledSize(260)
+    // The reading width, fitted to the space beside the outline pane, and never
+    // wider than that space in a narrow window.
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
-        Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
+        Math.max(360, width - outlineWidth - Math.round(writerFontMetrics.averageCharacterWidth * 20)),
+        editorFlick.width)
     property bool closeConfirmed: false
+    property var readingHeaderRows: []
+    property color readingShade: "transparent"
     property bool searchOpen: false
     property bool searchUpdating: false
+    // Each match's start and end, in the text of the view shown.
     property var searchMatches: []
+    // The reading view's highlights, for the matches in and near the view only.
+    property var readingMatchBoxes: []
     property int searchMatchIndex: -1
     property url pendingOpenUrl
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    // The outline entry being read, or -1 above the first heading. After a jump
+    // it is held on the picked entry, which may not have reached the top, until
+    // the view next moves; an edit alone does not move it.
+    property int markedHeading: -1
+    property bool markHeld: false
+    // Which view is shown: the rendered page, or the editable text. Every loaded
+    // document opens reading; a new window with nothing to read opens editing.
+    property bool reading: false
+
+    // The find bar stays open across a switch, and its matches are found again in
+    // the view shown once it is in place (restorePlace). Replace works on the
+    // editable text only, and the editor's highlights go while the page is shown.
+    onReadingChanged: {
+        if (!reading || !searchOpen)
+            return;
+        replaceOpen = false;
+        searchUpdating = true;
+        backend.setSearchHighlight("", -1);
+        editor.deselect();
+        searchUpdating = false;
+    }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -80,9 +110,204 @@ ApplicationWindow {
         font.pixelSize: win.editorFontPixelSize
     }
 
+    // Whole numbers with commas between thousands, as the stat cards show them.
+    function formatCount(count) {
+        return Number(count).toLocaleString(Qt.locale("en_US"), 'f', 0);
+    }
+
     // Every hardcoded size in the interface is expressed at text scale 1.
     function scaledSize(pixels) {
         return Math.max(1, Math.round(pixels * win.textScale));
+    }
+
+    // Where outline entry `index` starts in the view shown, in the scrolling
+    // area's coordinates; undefined when the reading view shows no heading
+    // matched to it.
+    function headingY(index) {
+        if (reading) {
+            var position = backend.readingHeadingPositions[index];
+            if (position === undefined || position < 0)
+                return undefined;
+            return reader.y + reader.positionToRectangle(position).y;
+        }
+        return editor.y + editor.positionToRectangle(
+            Math.min(backend.outline[index].position, editor.length)).y;
+    }
+
+    // Bring a heading to the top of the view, or as near as the end of the page
+    // allows, and mark it; an entry the reading view shows no heading for does
+    // nothing. In the editing view the cursor moves to the heading first, so the
+    // scroll that follows the cursor does not pull the view off it. The entry is
+    // marked and held after the scroll, which would otherwise mark by the usual
+    // rule. Focus stays where it is: a click moves it to the text, Enter in the
+    // outline leaves it there.
+    function jumpToHeading(index) {
+        var y = headingY(index);
+        if (y === undefined)
+            return;
+        if (!reading)
+            editor.cursorPosition = Math.min(backend.outline[index].position, editor.length);
+        editorFlick.scrollTo(editorFlick.clampContentY(y));
+        markedHeading = index;
+        markHeld = true;
+    }
+
+    // The last heading whose line starts at or above the top of the view. Scrolled
+    // to the very top, the text starts below the view's edge, so the first line
+    // counts as at the top then. A pixel of slack covers the view's snapping.
+    // Headings only move down the page, so a binary search will do; in the
+    // reading view it runs over the entries matched to a heading there.
+    function headingAtTop() {
+        var entries = [];
+        for (var i = 0; i < backend.outline.length; ++i) {
+            if (!reading || backend.readingHeadingPositions[i] >= 0)
+                entries.push(i);
+        }
+        var readingLine = Math.max(editorFlick.contentY, editor.y) + 1;
+        var found = -1;
+        var low = 0;
+        var high = entries.length - 1;
+        while (low <= high) {
+            var middle = Math.floor((low + high) / 2);
+            if (headingY(entries[middle]) <= readingLine) {
+                found = entries[middle];
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return found;
+    }
+
+    function updateMark() {
+        if (!markHeld)
+            markedHeading = headingAtTop();
+    }
+
+    // Where a section runs in the view shown: from its heading, or the top above
+    // the first heading, to the next heading the view shows, or the page's end.
+    function sectionBounds(section) {
+        var view = reading ? reader : editor;
+        var start = section < 0 ? 0 : headingY(section);
+        var end = view.y + view.height;
+        for (var next = section + 1; next < backend.outline.length; ++next) {
+            var y = headingY(next);
+            if (y !== undefined) {
+                end = y;
+                break;
+            }
+        }
+        return {start: start, end: Math.max(end, start + 1)};
+    }
+
+    // The place being read: the section at the top of the view, as the outline
+    // entry marking it (-1 above the first heading), and how far through it the
+    // view is, as a share of its length. Two layouts of the same text differ in
+    // height, so a share of the section finds the same place where a share of
+    // the page would not.
+    function currentPlace() {
+        // At the very top, above the first line, the place is the top itself.
+        if (editorFlick.contentY <= 0)
+            return {section: -1, share: 0, atTop: true};
+        var section = headingAtTop();
+        var bounds = sectionBounds(section);
+        var share = (editorFlick.contentY - bounds.start) / (bounds.end - bounds.start);
+        return {section: section, share: Math.min(1, Math.max(0, share)), atTop: false};
+    }
+
+    // Once the view shown has its layout, bring it to the same place and mark the
+    // section. A section the reading view has no heading for gives way to the
+    // nearest one before it that it has. In the editor the cursor goes to the
+    // start of the line at the top first, so its own scrolling does not pull the
+    // view off the place.
+    function restorePlace(place) {
+        Qt.callLater(function() {
+            if (place.atTop) {
+                if (!reading)
+                    editor.cursorPosition = 0;
+                editorFlick.scrollTo(0);
+                markHeld = false;
+                updateMark();
+                if (searchOpen)
+                    refindFromView();
+                return;
+            }
+            var section = place.section;
+            while (section >= 0 && headingY(section) === undefined)
+                --section;
+            var bounds = sectionBounds(section);
+            var y = editorFlick.clampContentY(bounds.start + place.share * (bounds.end - bounds.start));
+            if (!reading)
+                editor.cursorPosition = editor.positionAt(0, Math.max(0, y - editor.y) + 1);
+            editorFlick.scrollTo(y);
+            markedHeading = section;
+            markHeld = true;
+            if (searchOpen)
+                refindFromView();
+        });
+    }
+
+    // Focus goes back to whichever view is shown.
+    function focusText() {
+        (reading ? reader : editor).forceActiveFocus();
+    }
+
+    // Into the outline with the marked entry selected, or the first when none is.
+    // With no headings there is nothing to select, and the text keeps the focus.
+    function focusOutline() {
+        if (backend.outline.length === 0) {
+            focusText();
+            return;
+        }
+        outlineList.currentIndex = Math.max(0, markedHeading);
+        outlineList.positionViewAtIndex(outlineList.currentIndex, ListView.Contain);
+        outlineList.forceActiveFocus();
+    }
+
+    function showReading() {
+        var place = currentPlace();
+        renderPage();
+        reading = true;
+        reader.forceActiveFocus();
+        restorePlace(place);
+    }
+
+    function showEditing(keepPlace) {
+        var place = currentPlace();
+        reading = false;
+        editor.forceActiveFocus();
+        if (keepPlace)
+            restorePlace(place);
+        else
+            updateMark();
+    }
+
+    // The page is laid out at the reader's width, and the header rows' shade is
+    // drawn behind it once it is laid out.
+    function renderPage() {
+        backend.renderReadingAtWidth(reader.width);
+        Qt.callLater(showHeaderShades);
+    }
+
+    function showHeaderShades() {
+        readingShade = backend.readingShade();
+        readingHeaderRows = backend.readingHeaderRows();
+    }
+
+    // The page is built for one theme, size and width, so a change rebuilds it.
+    function rerenderReading() {
+        if (!reading)
+            return;
+        var place = currentPlace();
+        renderPage();
+        restorePlace(place);
+    }
+
+    onMarkedHeadingChanged: showMarkInOutline()
+
+    function showMarkInOutline() {
+        if (markedHeading >= 0)
+            outlineList.positionViewAtIndex(markedHeading, ListView.Contain);
     }
 
     function toggleFullScreen() {
@@ -91,32 +316,111 @@ ApplicationWindow {
             : Window.FullScreen;
     }
 
-    function updateSearch() {
-        var matches = [];
+    // Matches ignore case. In the editor they are in its text, marks and all; on
+    // the page, in the text as it is shown.
+    function findMatches() {
         var query = searchField.text;
-        if (query.length > 0) {
-            var haystack = editor.text.toLocaleLowerCase();
-            var needle = query.toLocaleLowerCase();
-            var position = 0;
-            while ((position = haystack.indexOf(needle, position)) !== -1) {
-                matches.push(position);
-                position += Math.max(1, needle.length);
-            }
+        if (query.length === 0)
+            return [];
+        if (reading)
+            return backend.findInReading(query);
+        var matches = [];
+        var haystack = editor.text.toLocaleLowerCase();
+        var needle = query.toLocaleLowerCase();
+        var position = 0;
+        while ((position = haystack.indexOf(needle, position)) !== -1) {
+            matches.push({start: position, end: position + needle.length});
+            position += Math.max(1, needle.length);
         }
-        searchMatches = matches;
-        searchMatchIndex = matches.length > 0 ? 0 : -1;
+        return matches;
+    }
+
+    function updateSearch() {
+        searchMatches = findMatches();
+        searchMatchIndex = searchMatches.length > 0 ? 0 : -1;
         showSearchMatch();
     }
 
+    // Found again after a switch or on reopening, from the first match at or
+    // below the top of the view, so the view does not jump away from its place.
+    function refindFromView() {
+        searchMatches = findMatches();
+        var low = 0;
+        var high = searchMatches.length;
+        while (low < high) {
+            var middle = Math.floor((low + high) / 2);
+            if (matchRect(middle).y < editorFlick.contentY)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        searchMatchIndex = searchMatches.length === 0 ? -1 : low % searchMatches.length;
+        showSearchMatch();
+    }
+
+    // Where a match's first character is, in the scrolling area's coordinates.
+    function matchRect(index) {
+        var view = reading ? reader : editor;
+        var rect = view.positionToRectangle(searchMatches[index].start);
+        return Qt.rect(view.x + rect.x, view.y + rect.y, rect.width, rect.height);
+    }
+
     function showSearchMatch() {
-        var start = searchMatchIndex >= 0 ? searchMatches[searchMatchIndex] : -1;
+        var match = searchMatchIndex >= 0 ? searchMatches[searchMatchIndex] : null;
+        if (reading) {
+            if (match) {
+                var rect = matchRect(searchMatchIndex);
+                editorFlick.ensureVisible(rect.y, rect.y + rect.height);
+            }
+            showReadingMatches();
+            return;
+        }
         searchUpdating = true;
-        backend.setSearchHighlight(searchField.text, start);
-        if (start >= 0) {
-            editor.select(start, start + searchField.text.length);
+        backend.setSearchHighlight(searchField.text, match ? match.start : -1);
+        if (match) {
+            editor.select(match.start, match.end);
             editorFlick.ensureCursorVisible();
         }
         searchUpdating = false;
+    }
+
+    // Boxes over the matches from a screen above the view to a screen below it,
+    // found by a binary search, since a common letter can match thousands of times.
+    // A match wrapped onto a second line gets a box on each.
+    function showReadingMatches() {
+        if (!reading || !searchOpen || searchMatches.length === 0) {
+            readingMatchBoxes = [];
+            return;
+        }
+        var top = editorFlick.contentY - editorFlick.height;
+        var bottom = editorFlick.contentY + 2 * editorFlick.height;
+        var low = 0;
+        var high = searchMatches.length;
+        while (low < high) {
+            var middle = Math.floor((low + high) / 2);
+            if (matchRect(middle).y < top)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        var boxes = [];
+        for (var i = low; i < searchMatches.length; ++i) {
+            var first = reader.positionToRectangle(searchMatches[i].start);
+            if (reader.y + first.y > bottom)
+                break;
+            var last = reader.positionToRectangle(searchMatches[i].end);
+            var current = i === searchMatchIndex;
+            if (Math.abs(first.y - last.y) < 1) {
+                boxes.push({x: first.x, y: first.y, width: last.x - first.x,
+                            height: first.height, current: current});
+            } else {
+                boxes.push({x: first.x, y: first.y, width: reader.width - first.x,
+                            height: first.height, current: current});
+                boxes.push({x: 0, y: last.y, width: last.x, height: last.height,
+                            current: current});
+            }
+        }
+        readingMatchBoxes = boxes;
     }
 
     function moveSearch(direction) {
@@ -129,12 +433,13 @@ ApplicationWindow {
 
     function closeSearch() {
         searchOpen = false;
+        readingMatchBoxes = [];
         searchUpdating = true;
         backend.setSearchHighlight("", -1);
         editor.deselect();
         searchUpdating = false;
         replaceOpen = false;
-        editor.forceActiveFocus();
+        win.focusText();
     }
 
     Shortcut {
@@ -144,10 +449,24 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+E"
+        context: Qt.WindowShortcut
+        enabled: win.reading || editor.length > 0
+        onActivated: win.reading ? win.showEditing(true) : win.showReading()
+    }
+
+    Shortcut {
         sequence: "Ctrl+H"
         context: Qt.ApplicationShortcut
+        // Replace works on the editable text, so it opens there, in place; the
+        // matches are found once the editor is in place.
         onActivated: {
+            var switching = win.reading;
             searchOpen = true;
+            if (switching)
+                win.showEditing(true);
+            else
+                win.refindFromView();
             replaceOpen = true;
             searchField.forceActiveFocus();
             searchField.selectAll();
@@ -157,18 +476,21 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+B"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.wrapSelection("**", "**")
     }
 
     Shortcut {
         sequence: "Ctrl+I"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.wrapSelection("*", "*")
     }
 
     Shortcut {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.insertLink()
     }
 
@@ -211,13 +533,30 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Z"
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.undo()
     }
 
     Shortcut {
         sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
         context: Qt.WindowShortcut
+        enabled: !win.reading
         onActivated: editor.redo()
+    }
+
+    // Into the outline with the marked entry selected, and back to the text. An
+    // open dialog already keeps the key from reaching the outline.
+    Shortcut {
+        sequence: "Ctrl+J"
+        context: Qt.WindowShortcut
+        enabled: backend.outline.length > 0
+        onActivated: {
+            if (outlineList.activeFocus) {
+                win.focusText();
+                return;
+            }
+            win.focusOutline();
+        }
     }
 
     Shortcut {
@@ -225,6 +564,7 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         onActivated: {
             searchOpen = true;
+            win.refindFromView();
             searchField.forceActiveFocus();
             searchField.selectAll();
         }
@@ -252,6 +592,35 @@ ApplicationWindow {
         function onCloseAfterSave() {
             win.closeConfirmed = true;
             win.close();
+        }
+
+        // A freshly loaded document is read from its first line. Without this the
+        // caret is left at the end of the new text and the view follows it there.
+        // It opens in the reading view, and the focus the text or the outline had
+        // goes to the outline, so the arrows and Enter move through the page at
+        // once; the file's outline is already listed by now.
+        function onDocumentLoaded() {
+            editor.cursorPosition = 0;
+            win.renderPage();
+            win.reading = true;
+            win.updateMark();
+            if (editor.activeFocus || reader.activeFocus || outlineList.activeFocus)
+                win.focusOutline();
+            editorFlick.scrollTo(0);
+        }
+
+        function onThemeColorsChanged() {
+            win.rerenderReading();
+        }
+
+        function onTextScaleChanged() {
+            win.rerenderReading();
+        }
+
+        // A new outline resets the pane's list to its top, so show the mark again.
+        function onOutlineChanged() {
+            win.updateMark();
+            Qt.callLater(win.showMarkInOutline);
         }
 
         function onSaveSucceeded() {
@@ -326,12 +695,13 @@ ApplicationWindow {
 
     Dialog {
         id: shortcutsDialog
+        objectName: "shortcutsDialog"
         modal: true
         title: "Keyboard shortcuts"
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+J  Outline\nCtrl+E  Reading / Editing\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -339,14 +709,166 @@ ApplicationWindow {
     Item {
         anchors.fill: parent
 
+        component StatCard: Rectangle {
+            id: card
+            property string name
+            property string label
+            property string value
+
+            width: statCards.cardWidth
+            height: win.scaledSize(66)
+            radius: 8
+            color: Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.06)
+
+            Column {
+                anchors.centerIn: parent
+                spacing: win.scaledSize(2)
+
+                Label {
+                    objectName: card.name + "Value"
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    // A large figure in a narrow window shrinks to fit its card.
+                    width: card.width - win.scaledSize(12)
+                    horizontalAlignment: Text.AlignHCenter
+                    fontSizeMode: Text.HorizontalFit
+                    minimumPixelSize: win.scaledSize(11)
+                    text: card.value
+                    color: win.textColor
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(22)
+                }
+
+                Label {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: card.label
+                    // The muted colour is too faint on the card in light themes.
+                    color: Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.6)
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(11)
+                }
+            }
+        }
+
+        Row {
+            id: statCards
+            anchors.top: parent.top
+            anchors.topMargin: win.scaledSize(20)
+            // Over the text column, which is centred in the space beside the outline.
+            anchors.horizontalCenter: editorFlick.horizontalCenter
+            spacing: win.scaledSize(12)
+
+            readonly property int cardWidth: Math.floor((win.editorWidth - 3 * spacing) / 4)
+
+            StatCard { name: "words"; label: "Words"; value: win.formatCount(backend.wordCount) }
+            StatCard { name: "lines"; label: "Lines"; value: win.formatCount(backend.lineCount) }
+            StatCard { name: "tokens"; label: "Tokens"; value: "≈ " + win.formatCount(backend.tokenEstimate) }
+            StatCard { name: "sections"; label: "Sections"; value: win.formatCount(backend.sectionCount) }
+        }
+
+        Item {
+            id: outlinePane
+            anchors.top: statCards.bottom
+            anchors.topMargin: win.scaledSize(28)
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            // Clear of the footer's buttons below.
+            anchors.bottomMargin: win.scaledSize(40)
+            width: win.outlineWidth
+
+            ListView {
+                id: outlineList
+                objectName: "outlineList"
+                anchors.fill: parent
+                anchors.leftMargin: win.scaledSize(16)
+                anchors.rightMargin: win.scaledSize(8)
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: backend.outline
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                // The arrows move the selection by the list's own key navigation,
+                // which leaves the text where it is.
+                Keys.onReturnPressed: win.jumpToHeading(currentIndex)
+                Keys.onEnterPressed: win.jumpToHeading(currentIndex)
+                Keys.onEscapePressed: win.focusText()
+                // Opening a file without headings from here leaves nothing to select.
+                onCountChanged: {
+                    if (count === 0 && activeFocus)
+                        win.focusText();
+                }
+
+                delegate: Rectangle {
+                    required property var modelData
+                    required property int index
+                    readonly property bool untitled: modelData.title === ""
+                    readonly property bool marked: index === win.markedHeading
+                    readonly property bool selected: ListView.isCurrentItem && ListView.view.activeFocus
+
+                    width: ListView.view.width
+                    height: win.scaledSize(30)
+                    radius: 6
+                    color: marked
+                        ? Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.10)
+                        : entryMouse.containsMouse
+                            ? Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.05)
+                            : "transparent"
+                    // The keyboard selection is a ring, apart from the mark's tint.
+                    border.width: selected ? 1 : 0
+                    border.color: backend.themeAccent
+
+                    Label {
+                        anchors.fill: parent
+                        anchors.leftMargin: win.scaledSize(10) + (modelData.level - 1) * win.scaledSize(14)
+                        anchors.rightMargin: win.scaledSize(10)
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        text: untitled ? "Untitled heading" : modelData.title
+                        color: marked ? backend.themeAccent
+                            : untitled ? win.mutedColor : win.textColor
+                        font.family: "iA Writer Mono S"
+                        font.pixelSize: win.scaledSize(13)
+                        font.weight: modelData.level === 1 ? Font.DemiBold : Font.Normal
+                    }
+
+                    MouseArea {
+                        id: entryMouse
+                        objectName: "outlineEntry"
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            win.jumpToHeading(index);
+                            win.focusText();
+                        }
+                    }
+                }
+            }
+
+            Label {
+                objectName: "noHeadings"
+                visible: outlineList.count === 0
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.leftMargin: win.scaledSize(26)
+                text: "No headings"
+                color: win.mutedColor
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.scaledSize(13)
+            }
+        }
+
         Flickable {
             id: editorFlick
-            anchors.fill: parent
+            objectName: "editorFlick"
+            anchors.top: statCards.bottom
+            anchors.left: outlinePane.right
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: Math.max(height, editor.y
+                + (win.reading ? reader.implicitHeight : editor.implicitHeight) + 220)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -354,10 +876,9 @@ ApplicationWindow {
                 // flicking the Flickable, so the bar has to be told about
                 // that activity; linger briefly after the last event.
                 active: hovered || pressed || wheelScroll.running || scrollLinger.running
-                // Stop above the footer strip so the bar doesn't overlap
-                // the word count in the bottom-right corner. Padding and
-                // inset, not anchors: the attached-ScrollBar layout overrides
-                // anchors. Padding stops the thumb, the inset the track.
+                // Stop above the footer strip so the bar stays clear of it.
+                // Padding and inset, not anchors: the attached-ScrollBar layout
+                // overrides anchors. Padding stops the thumb, the inset the track.
                 bottomPadding: win.scaledSize(32)
                 bottomInset: win.scaledSize(32)
             }
@@ -474,6 +995,13 @@ ApplicationWindow {
 
             onMovementStarted: wheelScroll.stop()
 
+            onContentYChanged: {
+                if (win.reading && win.searchOpen)
+                    Qt.callLater(win.showReadingMatches);
+                win.markHeld = false;
+                win.updateMark();
+            }
+
             function scrollByWheel(wheel) {
                 // High-resolution wheels report fractional notches; feed
                 // those through the same animated path, like Chromium does
@@ -517,21 +1045,29 @@ ApplicationWindow {
 
             // Keep the editing caret within the viewport so writing past the
             // bottom edge scrolls the page along with the text.
-            function ensureCursorVisible() {
+            // Scrolls the least that shows a span of the page with a margin round it.
+            function ensureVisible(top, bottom) {
                 var margin = win.editorFontPixelSize * 2;
-                var cursorTop = editor.y + editor.cursorRectangle.y;
-                var cursorBottom = cursorTop + editor.cursorRectangle.height;
                 var maxContentY = Math.max(0, contentHeight - height);
+                if (bottom + margin > contentY + height)
+                    scrollTo(Math.min(maxContentY, bottom + margin - height));
+                else if (top - margin < contentY)
+                    scrollTo(Math.max(0, top - margin));
+            }
 
-                if (cursorBottom + margin > contentY + height)
-                    scrollTo(Math.min(maxContentY, cursorBottom + margin - height));
-                else if (cursorTop - margin < contentY)
-                    scrollTo(Math.max(0, cursorTop - margin));
+            function ensureCursorVisible() {
+                // The editor is hidden while reading, and its cursor must not
+                // move the page.
+                if (win.reading)
+                    return;
+                var cursorTop = editor.y + editor.cursorRectangle.y;
+                ensureVisible(cursorTop, cursorTop + editor.cursorRectangle.height);
             }
 
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
+                visible: !win.reading
                 x: Math.round((editorFlick.width - width) / 2)
                 y: Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
@@ -559,6 +1095,8 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                // The text has rewrapped by now, so headings are where they will be drawn.
+                onWidthChanged: win.updateMark()
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
@@ -794,6 +1332,83 @@ ApplicationWindow {
                     forceActiveFocus();
                 }
             }
+
+            // The text view draws no table cell backgrounds, so the header rows'
+            // shade is drawn behind the page.
+            Repeater {
+                model: win.reading ? win.readingHeaderRows : []
+
+                Rectangle {
+                    x: reader.x + modelData.x
+                    y: reader.y + modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    color: win.readingShade
+                }
+            }
+
+            // The rendered page. The backend fills its document from the text; it
+            // is never edited, and nothing in it is written back.
+            TextEdit {
+                id: reader
+                objectName: "readingView"
+                visible: win.reading
+                x: editor.x
+                y: editor.y
+                width: editor.width
+                textFormat: TextEdit.RichText
+                wrapMode: TextEdit.Wrap
+                readOnly: true
+                selectByMouse: true
+                color: win.textColor
+                selectedTextColor: win.strongTextColor
+                selectionColor: win.selectionFill
+                font.family: "iA Writer Duo S"
+                font.pixelSize: win.editorFontPixelSize
+                renderType: editor.renderType
+                onLinkActivated: function(link) {
+                    backend.openExternalUrl(link);
+                }
+                // Code blocks are fitted to the column, so a new width rebuilds
+                // the page, once the width has settled.
+                onWidthChanged: readerWidthSettled.restart()
+                // A new layout moves the header rows and the headings.
+                onContentHeightChanged: {
+                    Qt.callLater(win.showHeaderShades);
+                    Qt.callLater(win.updateMark);
+                    Qt.callLater(win.showReadingMatches);
+                }
+
+                Timer {
+                    id: readerWidthSettled
+                    objectName: "readerWidthSettled"
+                    interval: 150
+                    onTriggered: win.rerenderReading()
+                }
+
+                HoverHandler {
+                    cursorShape: reader.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.IBeamCursor
+                }
+
+                Component.onCompleted: backend.attachReadingDocument(textDocument)
+            }
+
+            // Find's highlights on the page, drawn over it and a little clear so the
+            // text shows through: the page's own boxes would hide anything beneath.
+            Repeater {
+                model: win.readingMatchBoxes
+
+                Rectangle {
+                    x: reader.x + modelData.x
+                    y: reader.y + modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    opacity: 0.5
+                    color: modelData.current
+                        ? (win.darkMode ? "#b36b20" : "#ffad42")
+                        : (win.darkMode ? "#725b18" : "#ffe58a")
+                }
+            }
         }
 
         Row {
@@ -834,18 +1449,6 @@ ApplicationWindow {
             }
         }
 
-        Label {
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 12
-            anchors.bottomMargin: 10
-            text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
-            color: win.mutedColor
-            opacity: 0.75
-            font.family: "iA Writer Mono S"
-            font.pixelSize: win.scaledSize(11)
-        }
-
 
         Pane {
             anchors.top: parent.top
@@ -878,6 +1481,7 @@ ApplicationWindow {
 
                     TextInput {
                         id: searchField
+                        objectName: "searchField"
                         anchors.left: parent.left
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -950,9 +1554,8 @@ ApplicationWindow {
                     text: "Replace"
                     onClicked: {
                         if (win.searchMatchIndex < 0) return;
-                        var start = win.searchMatches[win.searchMatchIndex];
-                        EditorMutations.replaceRange(editor, start,
-                                                     start + searchField.text.length,
+                        var match = win.searchMatches[win.searchMatchIndex];
+                        EditorMutations.replaceRange(editor, match.start, match.end,
                                                      replaceField.text);
                         win.updateSearch();
                     }
@@ -964,9 +1567,8 @@ ApplicationWindow {
                     onClicked: {
                         if (searchField.text.length === 0) return;
                         for (var i = win.searchMatches.length - 1; i >= 0; --i) {
-                            var start = win.searchMatches[i];
-                            EditorMutations.replaceRange(editor, start,
-                                                         start + searchField.text.length,
+                            var match = win.searchMatches[i];
+                            EditorMutations.replaceRange(editor, match.start, match.end,
                                                          replaceField.text);
                         }
                         win.updateSearch();

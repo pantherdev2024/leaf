@@ -32,8 +32,11 @@
 #include <algorithm>
 
 #include "markdownhighlighter.h"
+#include "structurescan.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
+// The reading view's body size at text scale 1, the editor's own.
+constexpr qreal readingBodyPixelSize = 17;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
@@ -91,9 +94,15 @@ Backend::Backend(QObject *parent) : QObject(parent) {
             }
         }
     }
-    m_wordCountTimer.setSingleShot(true);
-    m_wordCountTimer.setInterval(120);
-    connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
+    m_recountTimer.setSingleShot(true);
+    m_recountTimer.setInterval(120);
+    connect(&m_recountTimer, &QTimer::timeout, this,
+            [this]() {
+                recount(currentDocumentText());
+                // Loading restyles the whole document, so only edits need this.
+                if (m_highlighter)
+                    m_highlighter->refreshFrontMatter();
+            });
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
@@ -290,12 +299,37 @@ void Backend::printDocument() {
     if (dialog.windowHandle() && m_parentWindow)
         dialog.windowHandle()->setTransientParent(m_parentWindow);
 
-    if (dialog.exec() == QDialog::Accepted) {
-        QTextDocument rendered;
-        rendered.setDefaultFont(m_document->defaultFont());
-        rendered.setMarkdown(currentDocumentText());
-        rendered.print(&printer);
-    }
+    if (dialog.exec() == QDialog::Accepted)
+        printTo(&printer);
+}
+
+void Backend::buildPrintDocument(QTextDocument *document, const QSizeF &pageSize) const {
+    // Paper is white, so the light theme's own defaults, whatever is on screen,
+    // at the body size the reading view has at the standard text size.
+    ReadingRenderer::Style style = readingStyleIn(QColor(QStringLiteral("#ffffff")),
+                                                  QColor(QStringLiteral("#222324")),
+                                                  QColor(QStringLiteral("#2077b2")), false);
+    style.bodyPixelSize = readingBodyPixelSize;
+    style.columnWidth = pageSize.width();
+    document->setPageSize(pageSize);
+    ReadingRenderer::render(document, currentDocumentText(), style);
+    ReadingRenderer::shadeHeaderCells(document, style.shade);
+}
+
+void Backend::printTo(QPrinter *printer) const {
+    // Qt gives an unsized document 2 cm margins when the printer has none, as a
+    // PDF printer does; a sized one gets none, so they are set here.
+    const QMarginsF margins = printer->pageLayout().margins(QPageLayout::Millimeter);
+    if (margins.left() < 10 && margins.top() < 10 && margins.right() < 10 && margins.bottom() < 10)
+        printer->setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
+
+    // A document with a page size is printed scaled from screen pixels to the
+    // printer's, so the page is sized from the printable area at 96 pixels to
+    // the inch, the reading view's own measure.
+    const QSizeF points = printer->pageLayout().paintRect(QPageLayout::Point).size();
+    QTextDocument printed;
+    buildPrintDocument(&printed, points * 96.0 / 72.0);
+    printed.print(printer);
 }
 
 void Backend::newWindow() {
@@ -354,7 +388,7 @@ bool Backend::editorTextChanged() {
         m_formattedBlockCount = blockCount;
     }
 
-    scheduleWordCount();
+    scheduleRecount();
     setModified(true);
     setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
@@ -422,6 +456,115 @@ void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maxim
     settings.setValue(QStringLiteral("window/maximized"), maximized);
 }
 
+void Backend::attachReadingDocument(QObject *textDocument) {
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    if (!quickDocument || !quickDocument->textDocument()) {
+        setStatus(QStringLiteral("Could not attach the reading view."));
+        return;
+    }
+    m_readingDocument = quickDocument->textDocument();
+    m_readingDocument->setUndoRedoEnabled(false);
+    renderReading();
+}
+
+void Backend::renderReadingAtWidth(qreal columnWidth) {
+    m_readingColumnWidth = columnWidth;
+    renderReading();
+}
+
+ReadingRenderer::Style Backend::readingStyle() const {
+    return readingStyleIn(QColor(m_themeBackground), QColor(m_themeForeground),
+                          QColor(m_themeAccent), m_darkMode);
+}
+
+ReadingRenderer::Style Backend::readingStyleIn(const QColor &background,
+                                               const QColor &foreground,
+                                               const QColor &accent, bool dark) const {
+    // A share of the way from the page's colour to the text's.
+    const auto towardText = [&](qreal share) {
+        return QColor::fromRgbF(
+            background.redF() + (foreground.redF() - background.redF()) * share,
+            background.greenF() + (foreground.greenF() - background.greenF()) * share,
+            background.blueF() + (foreground.blueF() - background.blueF()) * share);
+    };
+    ReadingRenderer::Style style;
+    style.text = foreground;
+    style.accent = accent;
+    // A faint wash of the text colour over the page, visible in either mode.
+    style.shade = towardText(dark ? 0.12 : 0.08);
+    style.line = towardText(dark ? 0.3 : 0.25);
+    style.dim = towardText(0.55);
+    style.bodyPixelSize = qMax<qreal>(1, qRound(readingBodyPixelSize * m_textScale));
+    style.proseFamily = QStringLiteral("iA Writer Duo S");
+    style.codeFamily = QStringLiteral("iA Writer Mono S");
+    style.fileUrl = m_fileUrl;
+    style.columnWidth = m_readingColumnWidth;
+    return style;
+}
+
+void Backend::renderReading() {
+    if (!m_readingDocument || !m_document)
+        return;
+    ReadingRenderer::render(m_readingDocument, currentDocumentText(), readingStyle());
+    matchReadingHeadings();
+}
+
+// Run after a render and after the outline changes: a reload renders the page
+// before the recount has listed the new outline.
+void Backend::matchReadingHeadings() {
+    QVariantList positions;
+    if (m_readingDocument) {
+        QList<ReadingRenderer::OutlineEntry> entries;
+        for (const QVariant &entry : std::as_const(m_outline)) {
+            const QVariantMap heading = entry.toMap();
+            entries.append({heading.value(QStringLiteral("level")).toInt(),
+                            heading.value(QStringLiteral("title")).toString()});
+        }
+        const QList<ReadingRenderer::RenderedHeading> rendered
+            = ReadingRenderer::headings(m_readingDocument);
+        for (const int match : ReadingRenderer::matchHeadings(entries, rendered)) {
+            positions.append(match < 0 ? -1
+                                       : m_readingDocument->findBlockByNumber(rendered.at(match).block)
+                                             .position());
+        }
+    }
+    if (positions != m_readingHeadingPositions) {
+        m_readingHeadingPositions = positions;
+        emit readingHeadingPositionsChanged();
+    }
+}
+
+QVariantList Backend::readingHeaderRows() const {
+    QVariantList rows;
+    if (!m_readingDocument)
+        return rows;
+    for (const QRectF &row : ReadingRenderer::headerRows(m_readingDocument)) {
+        rows.append(QVariantMap{{QStringLiteral("x"), row.x()}, {QStringLiteral("y"), row.y()},
+                                {QStringLiteral("width"), row.width()},
+                                {QStringLiteral("height"), row.height()}});
+    }
+    return rows;
+}
+
+QVariantList Backend::findInReading(const QString &query) const {
+    QVariantList matches;
+    if (!m_readingDocument || query.isEmpty())
+        return matches;
+    // The document's own search, so positions are the page's even around its
+    // frames, which its plain text does not count the same way.
+    QTextCursor found = m_readingDocument->find(query, 0);
+    while (!found.isNull()) {
+        matches.append(QVariantMap{{QStringLiteral("start"), found.selectionStart()},
+                                   {QStringLiteral("end"), found.selectionEnd()}});
+        found = m_readingDocument->find(query, found.selectionEnd());
+    }
+    return matches;
+}
+
+QColor Backend::readingShade() const {
+    return readingStyle().shade;
+}
+
 void Backend::loadDocumentText(const QString &text) {
     if (!m_document) {
         setStatus(QStringLiteral("Could not attach the Markdown renderer."));
@@ -434,8 +577,10 @@ void Backend::loadDocumentText(const QString &text) {
     m_loading = false;
 
     applyDocumentTypography();
-    m_wordCountTimer.stop();
-    setWordCount(countWords(text));
+    m_recountTimer.stop();
+    // The figures describe the text as the editor holds it, as after any edit.
+    recount(currentDocumentText());
+    emit documentLoaded();
 }
 
 void Backend::setFileUrl(const QUrl &url) {
@@ -702,20 +847,91 @@ QString Backend::suggestedFileName(const QString &text) {
     return name;
 }
 
-void Backend::setWordCount(int words) {
-    if (m_wordCount == words)
-        return;
-
-    m_wordCount = words;
-    emit wordCountChanged();
+int Backend::countLines(const QString &text) {
+    if (text.isEmpty())
+        return 0;
+    // A line break at the very end closes the last line rather than starting one.
+    return text.count(QLatin1Char('\n')) + (text.endsWith(QLatin1Char('\n')) ? 0 : 1);
 }
 
-void Backend::refreshWordCount() {
-    setWordCount(countWords(currentDocumentText()));
+int Backend::estimateTokens(const QString &text) {
+    // About four characters to a token, halves rounded up.
+    return (text.length() + 2) / 4;
 }
 
-void Backend::scheduleWordCount() {
-    m_wordCountTimer.start();
+QString Backend::outlineTitle(const QString &headingText) {
+    // A closing run of #s counts only after a space, so "C#" keeps its #.
+    static const QRegularExpression closingRe(QStringLiteral("(?:^|\\s)#+\\s*$"));
+    QString title = headingText;
+    title.remove(closingRe);
+
+    // Drop the markers by the rules the styling hides them with. Markers can
+    // overlap -- an underscore pair inside a link's address is also italic -- so
+    // mark every character to drop first, then keep the rest. Markers inside
+    // inline code are text.
+    QVector<bool> drop(title.size(), false);
+    const auto dropSpan = [&drop](int start, int length) {
+        for (int i = start; i < start + length; ++i)
+            drop[i] = true;
+    };
+    const QList<MarkdownHighlighter::Span> code = MarkdownHighlighter::inlineCodeSpans(title);
+    const auto insideCode = [&code](const MarkdownHighlighter::Span &marker) {
+        return std::any_of(code.begin(), code.end(), [&marker](const auto &span) {
+            return marker.start >= span.start && marker.start < span.start + span.length;
+        });
+    };
+    for (const MarkdownHighlighter::InlineMarkup &item : MarkdownHighlighter::inlineMarkup(title)) {
+        for (const MarkdownHighlighter::Span &marker : item.markers) {
+            if (!insideCode(marker))
+                dropSpan(marker.start, marker.length);
+        }
+    }
+    for (const MarkdownHighlighter::Span &span : code) {
+        dropSpan(span.start, 1);
+        dropSpan(span.start + span.length - 1, 1);
+    }
+
+    QString kept;
+    for (int i = 0; i < title.size(); ++i) {
+        if (!drop.at(i))
+            kept += title.at(i);
+    }
+    return kept.trimmed();
+}
+
+// Everything derived from the text is worked out here, from one scan, so the
+// figures and the outline cannot disagree with each other.
+void Backend::recount(const QString &text) {
+    const StructureScan::Structure structure = StructureScan::scan(text);
+    const int words = countWords(text);
+    const int lines = countLines(text);
+    const int tokens = estimateTokens(text);
+    const int sections = structure.headings.size();
+
+    if (words != m_wordCount || lines != m_lineCount || tokens != m_tokenEstimate
+            || sections != m_sectionCount) {
+        m_wordCount = words;
+        m_lineCount = lines;
+        m_tokenEstimate = tokens;
+        m_sectionCount = sections;
+        emit statsChanged();
+    }
+
+    QVariantList outline;
+    for (const StructureScan::Heading &heading : structure.headings) {
+        outline.append(QVariantMap{{QStringLiteral("level"), heading.level},
+                                   {QStringLiteral("title"), outlineTitle(heading.text)},
+                                   {QStringLiteral("position"), heading.position}});
+    }
+    if (outline != m_outline) {
+        m_outline = outline;
+        matchReadingHeadings();
+        emit outlineChanged();
+    }
+}
+
+void Backend::scheduleRecount() {
+    m_recountTimer.start();
 }
 
 void Backend::applyDocumentTypography() {

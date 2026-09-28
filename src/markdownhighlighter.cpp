@@ -3,7 +3,18 @@
 #include <QColor>
 #include <QFont>
 #include <QFontMetricsF>
+#include <QTextBlock>
 #include <QTextDocument>
+
+#include "structurescan.h"
+
+namespace {
+
+// Block state for a front matter line. Fence states from the structure scan are
+// 6 or more, and 0 means an ordinary line outside code.
+constexpr int frontMatterState = 1;
+
+}  // namespace
 
 MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document)
     : QSyntaxHighlighter(document) {
@@ -38,6 +49,24 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
     m_searchQuery = query;
     m_currentMatchStart = currentMatchStart;
     rehighlight();
+}
+
+void MarkdownHighlighter::refreshFrontMatter() {
+    if (!m_frontMatterMoved && findFrontMatterEnd() == m_frontMatterEndLine)
+        return;
+    m_frontMatterMoved = false;
+    rehighlight();
+}
+
+int MarkdownHighlighter::findFrontMatterEnd() const {
+    const QTextDocument *doc = document();
+    if (!doc || !StructureScan::opensFrontMatter(doc->firstBlock().text()))
+        return -1;
+    for (QTextBlock block = doc->firstBlock().next(); block.isValid(); block = block.next()) {
+        if (StructureScan::closesFrontMatter(block.text()))
+            return block.blockNumber();
+    }
+    return -1;
 }
 
 void MarkdownHighlighter::rebuildFormats() {
@@ -104,8 +133,34 @@ void MarkdownHighlighter::rebuildFormats() {
 }
 
 void MarkdownHighlighter::highlightBlock(const QString &text) {
+    const int blockNumber = currentBlock().blockNumber();
+    if (blockNumber == 0) {
+        // Restyling the first line alone does not reach the lines between the old
+        // end and the new one, so the next refresh restyles them.
+        const int frontMatterEnd = findFrontMatterEnd();
+        if (frontMatterEnd != m_frontMatterEndLine) {
+            m_frontMatterEndLine = frontMatterEnd;
+            m_frontMatterMoved = true;
+        }
+    }
+
+    // A front matter or code line keeps its other styling but is never a heading.
+    // The state carries an open fence to the next line, and a changed state makes
+    // Qt restyle the lines below, so typing a fence restyles the block at once.
+    bool heading = false;
+    if (blockNumber <= m_frontMatterEndLine) {
+        setCurrentBlockState(frontMatterState);
+    } else {
+        int fenceState = qMax(0, previousBlockState());
+        if (fenceState == frontMatterState)
+            fenceState = 0;
+        heading = StructureScan::classifyLine(text, fenceState)
+            == StructureScan::LineKind::Heading;
+        setCurrentBlockState(fenceState);
+    }
+
     if (!text.isEmpty()) {
-        highlightMarkers(text);
+        highlightMarkers(text, heading);
         if (text.contains(QLatin1Char('`')) || text.contains(QLatin1Char('*'))
             || text.contains(QLatin1Char('_')) || text.contains(QLatin1Char('['))) {
             highlightInline(text);
@@ -130,7 +185,7 @@ void MarkdownHighlighter::highlightSearch(const QString &text) {
     }
 }
 
-void MarkdownHighlighter::highlightMarkers(const QString &text) {
+void MarkdownHighlighter::highlightMarkers(const QString &text, bool heading) {
     int first = 0;
     while (first < text.length() && text.at(first).isSpace())
         ++first;
@@ -138,16 +193,11 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
         return;
 
     const QChar firstChar = text.at(first);
-    if (first == 0 && firstChar == QLatin1Char('#')) {
-        static const QRegularExpression headingRe(QStringLiteral("^(#{1,6})(\\s+)(.*)$"));
-        const QRegularExpressionMatch heading = headingRe.match(text);
-        if (heading.hasMatch()) {
-            setFormat(0, heading.capturedLength(1) + heading.capturedLength(2),
-                      m_markerFormat);
-            setFormat(heading.capturedStart(3), heading.capturedLength(3),
-                      m_headingFormat);
-            return;
-        }
+    if (heading) {
+        const int textStart = StructureScan::headingLine(text).textStart;
+        setFormat(0, textStart, m_markerFormat);
+        setFormat(textStart, text.length() - textStart, m_headingFormat);
+        return;
     }
 
     if (firstChar == QLatin1Char('>')) {
@@ -178,14 +228,8 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {
-    if (text.contains(QLatin1Char('`'))) {
-        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
-        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
-        while (codeMatches.hasNext()) {
-            const QRegularExpressionMatch match = codeMatches.next();
-            setFormat(match.capturedStart(0), match.capturedLength(0), m_codeFormat);
-        }
-    }
+    for (const Span &code : inlineCodeSpans(text))
+        setFormat(code.start, code.length, m_codeFormat);
 
     const QList<InlineMarkup> markup = inlineMarkup(text);
     for (const InlineMarkup &item : markup) {
@@ -197,6 +241,20 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         for (const Span &marker : item.markers)
             setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
     }
+}
+
+QList<MarkdownHighlighter::Span> MarkdownHighlighter::inlineCodeSpans(const QString &text) {
+    QList<Span> spans;
+    if (!text.contains(QLatin1Char('`')))
+        return spans;
+
+    static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+    QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
+    while (codeMatches.hasNext()) {
+        const QRegularExpressionMatch match = codeMatches.next();
+        spans.append({int(match.capturedStart(0)), int(match.capturedLength(0))});
+    }
+    return spans;
 }
 
 QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const QString &text) {
