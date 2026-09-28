@@ -11,7 +11,7 @@ mode: run
 ## Where we are
 
 Phase 2, slice 2-1 closed and docs/architecture.md reconciled. 2-2 switch-in-place not
-yet detailed. 1-3 and 2-1 are not committed yet.
+yet detailed. Everything through 2-1 is committed.
 
 ## Next
 
