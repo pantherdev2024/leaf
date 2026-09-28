@@ -1,8 +1,9 @@
 ---
 type: state
 description: Leaf opens every file in a rendered reading view, built from Qt's own Markdown support and restyled, with real table grids and shaded code boxes, and Ctrl+E to switch to the editable text.
-status: active
+status: closed
 opened: 2026-09-27
+closed: 2026-09-27
 mode: run
 ---
 
@@ -10,14 +11,12 @@ mode: run
 
 ## Where we are
 
-All slices done: phase 2 closed with 2-4, and the spec's verification run (see 2-4's
-notes). docs/architecture.md reconciled. Everything is committed.
+Closed 2026-09-27. All eight slices done and the spec's verification run; the
+foundation documents reconciled.
 
 ## Next
 
-The owner checks what a session cannot -- a web link opening, copying from the page,
-a live theme change, the running app -- and settles the spec's open question on
-showing which view is active. Then close the cycle: `close-work` on `reading-view`.
+Nothing. The cycle is closed.
 
 ## Done
 
@@ -31,21 +30,25 @@ showing which view is active. Then close the cycle: `close-work` on `reading-vie
 
 ## For a cold session
 
-- Brainstorm decisions (2026-09-27): always opens in the reading view; Ctrl+E toggles
-  to editing and back; front matter hidden in the reading view; tables as grids with
-  a shaded header, column alignment, wide tables wrap in cells; code blocks shaded,
-  monospace, wrapped, small language label; outline, jump, reading mark, Ctrl+J work
-  in both views and switching keeps the place; stat cards unchanged; editing view
-  stays as today; Ctrl+F finds in the reading view, replace only in editing; links
-  clickable; theme followed; printing prints the reading view. Approach 1 (Qt's
-  importer, restyled).
-- The look: the owner chose on 2026-09-27 to keep today's style (iA Writer Duo S,
-  today's sizes) rather than the T3 Code look, and to fix the bullets; 1-3 did so.
-- Two scope changes (`scope-changes.md`): the display copy closes void HTML tags such
-  as `<br>`; a file opens with the keyboard focus in the outline.
-- No stopgaps left: the outline, Ctrl+J, the mark, Ctrl+E's place and find all work in
-  the reading view; Ctrl+H switches to editing by design.
-- Printing goes through the renderer in light colours since 2-4; the header shade is
-  drawn by the window on screen and set on the cells for paper.
-- Judge the look only from the real window, never from the offscreen harness in
-  `/tmp/mdreal`. AGENTS.md says how to capture it headless, light theme included.
+- What was built: every file opens in a rendered reading view (Qt's Markdown importer,
+  restyled by `src/readingrenderer.*`) with table grids, shaded and labelled code
+  boxes, shaded quotes and round bullets; Ctrl+E switches to the editable text at the
+  same place; the outline, Ctrl+J, the mark and find work on the page; printing goes
+  through the same renderer in light colours; a file opens with the keyboard in the
+  outline.
+- Two scope changes (`scope-changes.md`): void HTML tags such as `<br>` closed in the
+  display copy; the keyboard focus starts in the outline on open.
+- The spec's open questions: a label for the view shown -- dropped by the owner
+  (2026-09-27), the two views look different enough; the exact look -- the owner kept
+  today's style over the T3 Code look; Qt's importer on real files -- fine, apart from
+  unclosed void tags (scope change); speed -- a switch into reading on a 5,000-line
+  file with tables and code draws in about 190 ms.
+- Verified by a session: the suite (103 tests), headless captures of the real window
+  in both themes, a PDF print, a live theme change, the file unchanged byte for byte.
+  Not checked by the owner at close: a web link opening in the browser, and copying
+  text from the page.
+- Follow-up for the owner to place: the package does not depend on `ttf-ia-writer`,
+  which provides the page's text font; the README now says so.
+- Qt Quick's text view limits shaped the design: no block or cell backgrounds (frames,
+  and window-drawn rectangles for header shade and find), and a crash on bordered
+  non-table frames. See 1-3's notes and AGENTS.md.

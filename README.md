@@ -15,7 +15,8 @@ system's dark or light mode, the live Omarchy theme and the desktop text size.
   makes Leaf your default app for Markdown files.
 
 Needs Qt 6 (`qt6-base`, `qt6-declarative`), `xdg-desktop-portal` with a backend,
-and qmake and make to build.
+and qmake and make to build. The reading view's text font, iA Writer Duo S, comes
+from the `ttf-ia-writer` package; without it Qt picks another font.
 
 ## Read more
 

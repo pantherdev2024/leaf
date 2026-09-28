@@ -74,6 +74,10 @@ do not act past it.
 - Qt Quick's text view draws a `QTextFrame`'s background but not a block's or a table
   cell's, and it crashes on a border set on any frame that is not a table. The
   reading view's boxes are borderless frames; see docs/architecture.md.
+- The reading view is rebuilt about 150 ms after its width settles, which moves its
+  headings. A window test that measures places on the page waits for that first
+  (`waitForPageToSettle` in `tests/tst_leaf.cpp`), or passes alone and fails in the
+  suite.
 - To see the reading view without taking the owner's focus, use a temporary test that
   loads the window, resizes it to 1898x1032, opens a file and saves `grabWindow()`;
   remove it afterwards. Colours come from

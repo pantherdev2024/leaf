@@ -40,7 +40,8 @@ better tool, and it is not built or packaged for anyone else.
   it.
 - **Heading** -- a Markdown heading line, one to six `#` characters and a space, at
   levels one to six. A `#` line inside a code block or front matter is not a heading.
-  Headings made by underlining a line with `===` or `---` are not recognised.
+  Headings made by underlining a line with `===` or `---` are not recognised: the
+  reading view draws them as headings, but the outline does not list them.
 - **Section** -- a heading and everything under it, up to the next heading of the same
   or a higher level. Sections nest.
 - **Outline** -- the list of a document's headings in order, indented by level, shown
@@ -57,8 +58,12 @@ better tool, and it is not built or packaged for anyone else.
 - **Reading view** -- how every document opens: the Markdown drawn as a finished
   page, with no `#` marks, `---` lines or fences showing, hard-wrapped lines joined
   back into paragraphs, tables as grids and code as boxes. It only displays; nothing
-  typed there reaches the file. Front matter and tag lines such as `<task>`, which are
-  written for tools rather than people, are left out of it.
+  typed there reaches the file, and the editing keys (bold, italic, link, undo, redo)
+  do nothing, though text can be selected and copied. Front matter and tag lines,
+  which are written for tools rather than people, are left out of it. A tag line is
+  a line outside a code block holding only one opening or closing tag, such as
+  `<task>`, `</context>` or `<example type="bad">`. A new, empty window has nothing
+  to read and opens in the editing view.
 - **Editing view** -- the file's own text, always editable, with styling laid over
   it, as in Omawrite. One key, Ctrl+E, switches between the two views, and the place
   being read is kept.
@@ -72,10 +77,11 @@ better tool, and it is not built or packaged for anyone else.
 
 **Open and read.** The owner opens a Markdown file, from the file manager, from a
 terminal or from inside Leaf. The window shows the stats across the top, the outline
-on the left and the document in the reading view from its start. Reloading after the file changes on
-disk, or recovering after a crash, also starts from the first line. They read by
-scrolling, and the outline follows, marking the section they are in. Find works in
-the reading view; links there can be clicked.
+on the left and the document in the reading view from its start. Reloading after
+the file changes on disk, or recovering after a crash, also starts from the first
+line. They read by scrolling, and the outline follows, marking the section they are
+in. Find works in the reading view; links there can be clicked. Printing prints the
+page as the reading view draws it, in light colours.
 
 **Jump to a section.** Without touching the mouse, the owner steps through the
 headings with the arrow keys and presses Enter. A file just opened starts with the
@@ -86,10 +92,11 @@ in the text.
 
 **Make a small edit.** The owner presses Ctrl+E, and the reading view gives way to
 the editing view at the same place. They type, as in Omawrite, and save; Ctrl+E takes
-them back to the reading view, which shows the edit. The stats and the outline update as they type. Replace is only in the editing view,
-since it changes the text. Everything
-Omawrite does to protect work still applies: recovery after a crash, a warning before
-a change on disk replaces local edits, a prompt before closing unsaved work.
+them back to the reading view, which shows the edit. The stats and the outline
+update as they type. Replace is only in the editing view, since it changes the
+text; Ctrl+H in the reading view switches there to replace. Everything Omawrite does
+to protect work still applies: recovery after a crash, a warning before a change on
+disk replaces local edits, a prompt before closing unsaved work.
 
 ## Constraints
 
@@ -208,4 +215,6 @@ without touching the file, and leaves editing as it was.
 - **How are true table grids and code boxes drawn?** Resolved: in the reading view
   (approach D), not over the editable text.
 - **What else in LLM files needs formatting** -- nested lists, block quotes, images,
-  diagrams? Not discussed; resolved by reading real files in Leaf.
+  diagrams? Resolved in the reading-view cycle by reading real files: the reading
+  view draws nested lists, quotes as shaded boxes, images from this machine, and
+  text diagrams kept whole.
