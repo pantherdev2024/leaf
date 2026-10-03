@@ -701,7 +701,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+J  Outline\nCtrl+E  Reading / Editing\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+Z  Undo\nCtrl+Shift+Z / Ctrl+Y  Redo\nCtrl+G  Next Match\nCtrl+P  Print\nCtrl+J  Outline\nCtrl+E  Reading / Editing\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -1413,6 +1413,7 @@ ApplicationWindow {
 
         Row {
             id: footerStatus
+            objectName: "footerStatus"
             anchors.left: parent.left
             anchors.bottom: parent.bottom
             anchors.leftMargin: 12
@@ -1447,6 +1448,24 @@ ApplicationWindow {
                 height: win.scaledSize(16)
                 verticalAlignment: Text.AlignVCenter
             }
+        }
+
+        // The keys most easily forgotten, always in sight; Ctrl+? lists the rest.
+        Label {
+            objectName: "shortcutHints"
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 12
+            anchors.bottomMargin: 10
+            height: win.scaledSize(16)
+            // Gives way rather than run into the footer in a narrow window.
+            visible: x > footerStatus.x + footerStatus.width + 24
+            opacity: 0.55
+            text: "Ctrl+J outline · Ctrl+E read/edit · Ctrl+F find · Ctrl+? all keys"
+            color: win.mutedColor
+            font.family: "iA Writer Mono S"
+            font.pixelSize: win.scaledSize(11)
+            verticalAlignment: Text.AlignVCenter
         }
 
 
