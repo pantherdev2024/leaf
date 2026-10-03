@@ -1955,6 +1955,55 @@ private slots:
         QVERIFY(listed);
     }
 
+    void listsUndoRedoAndNextMatchAmongTheShortcuts() {
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("shortcutsDialog"));
+        QVERIFY(dialog);
+        QString listed;
+        for (QObject *child : dialog->findChildren<QObject *>())
+            listed += child->property("text").toString();
+        QVERIFY(listed.contains(QStringLiteral("Ctrl+Z  Undo")));
+        QVERIFY(listed.contains(QStringLiteral("Ctrl+Shift+Z / Ctrl+Y  Redo")));
+        QVERIFY(listed.contains(QStringLiteral("Ctrl+G  Next Match")));
+    }
+
+    // The main keys are named in the corner, clear of the footer's buttons and
+    // status, and give way when the window is too narrow for both.
+    void namesTheMainShortcutsInTheCorner() {
+        QTemporaryDir directory;
+        const QString path = writeFile(directory.filePath(QStringLiteral("headed.md")),
+                                       headedDocument());
+        Backend backend;
+        QQmlEngine engine;
+        QScopedPointer<QObject> window(createWindow(backend, engine));
+        QVERIFY(window);
+        // Opening a file puts its name in the status, the footer at its widest.
+        backend.open(QUrl::fromLocalFile(path));
+        QVERIFY(!backend.status().isEmpty());
+
+        auto *hints = window->findChild<QQuickItem *>(QStringLiteral("shortcutHints"));
+        auto *footer = window->findChild<QQuickItem *>(QStringLiteral("footerStatus"));
+        QVERIFY(hints);
+        QVERIFY(footer);
+        const QString text = hints->property("text").toString();
+        for (const char *key : {"Ctrl+J", "Ctrl+E", "Ctrl+F", "Ctrl+?"})
+            QVERIFY2(text.contains(QLatin1String(key)), key);
+
+        // An earlier test's saved window size may be restored; start from the default.
+        window->setProperty("width", 1280);
+        QTRY_COMPARE(hints->mapRectToScene(hints->boundingRect()).right(), 1280 - 12);
+        QVERIFY(hints->isVisible());
+        const QRectF hintsBox = hints->mapRectToScene(hints->boundingRect());
+        const QRectF footerBox = footer->mapRectToScene(footer->boundingRect());
+        QVERIFY(hintsBox.left() > footerBox.right());
+
+        window->setProperty("width", 720);
+        QTRY_VERIFY(!hints->isVisible());
+    }
+
     static QString printedSample() {
         return QStringLiteral(
             "---\ntype: plan\n---\n# Printed\n\n<task>\n\nSome **bold** prose.\n\n"
